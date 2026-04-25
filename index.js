@@ -18,7 +18,7 @@ const Database = require("better-sqlite3");
 const TOKEN = process.env.TOKEN;
 
 // ================= ROLE =================
-const ROLE_OWNER = "1497524742868045934";
+const ROLE_OWNER = "1497524742868045934"; // pełna władza
 const ROLE_MOD = "1497541728306204712";
 
 // wezwania staff
@@ -28,7 +28,7 @@ const W3 = ["1497527663781351495","1497527565617729587","1497527457622790214"];
 const W4 = ["1497527300848091288","1497527197886447656"];
 const W5 = ["1497528458711138406","1497529283537797130","1497529477150933023"];
 
-// ================= BOT =================
+// ================= CLIENT =================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -38,7 +38,7 @@ const client = new Client({
   ]
 });
 
-// ================= DB XP =================
+// ================= DATABASE =================
 const db = new Database("xp.db");
 
 db.prepare(`
@@ -48,16 +48,16 @@ CREATE TABLE IF NOT EXISTS xp (
   lvl INTEGER
 )`).run();
 
-// ================= SYSTEM TICKETS =================
+// ================= SYSTEMY =================
 let ticketID = 0;
 const tickets = new Map();
 const cooldown = new Map();
 
-// ================= PERMS =================
-function maDostep(m) {
+// ================= PERMISJE =================
+function maDostep(member) {
   return (
-    m.roles.cache.has(ROLE_OWNER) ||
-    m.roles.cache.has(ROLE_MOD)
+    member.roles.cache.has(ROLE_OWNER) ||
+    member.roles.cache.has(ROLE_MOD)
   );
 }
 
@@ -83,17 +83,16 @@ function addXP(id) {
   return u;
 }
 
-// ================= COMMANDY =================
+// ================= KOMENDY =================
 const commands = [
-  new SlashCommandBuilder().setName("ping").setDescription("sprawdza bota"),
-
-  new SlashCommandBuilder().setName("panel").setDescription("panel ticketów"),
-
-  new SlashCommandBuilder().setName("userinfo").setDescription("info usera")
+  new SlashCommandBuilder().setName("ping").setDescription("Sprawdza działanie bota"),
+  new SlashCommandBuilder().setName("panel").setDescription("Panel ticketów"),
+  new SlashCommandBuilder().setName("userinfo").setDescription("Informacje o użytkowniku")
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(TOKEN);
 
+// ================= READY =================
 client.once("ready", async () => {
   console.log(`Zalogowano jako ${client.user.tag}`);
 
@@ -103,13 +102,12 @@ client.once("ready", async () => {
   );
 });
 
-// ================= MESSAGE =================
+// ================= MESSAGE SYSTEM =================
 client.on("messageCreate", async (msg) => {
   if (msg.author.bot) return;
 
   const xp = addXP(msg.author.id);
 
-  // linki
   if (msg.content.includes("http")) {
     if (!msg.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
       msg.delete().catch(() => {});
@@ -117,22 +115,19 @@ client.on("messageCreate", async (msg) => {
     }
   }
 
-  // caps
   if (msg.content.length > 6 && msg.content === msg.content.toUpperCase()) {
     msg.channel.send("⚠️ nie krzycz");
   }
 
   if (xp.xp === 0 && xp.lvl > 0) {
-    msg.channel.send(`📊 level up: ${xp.lvl}`);
+    msg.channel.send(`📊 poziom: ${xp.lvl}`);
   }
 
-  // ================= WEZWANIA =================
+  // ================= WEZWANIA STAFF =================
   if (msg.content.startsWith("!w")) {
 
     const t = tickets.get(msg.channel.id);
-
-    if (!t || t.claimed)
-      return msg.reply("❌ najpierw unclaim ticket");
+    if (!t || t.claimed) return msg.reply("❌ unclaim ticket");
 
     const cd = cooldown.get(msg.author.id) || 0;
     if (Date.now() - cd < 15000)
@@ -152,7 +147,7 @@ client.on("messageCreate", async (msg) => {
       embeds: [
         new EmbedBuilder()
           .setTitle("🚨 WEZWANIE STAFF")
-          .setDescription(`Użytkownik ${msg.author} prosi o pomoc`)
+          .setDescription(`Użytkownik ${msg.author} potrzebuje pomocy`)
           .setColor("#ED4245")
       ],
       content: roles.map(r => `<@&${r}>`).join(" ")
@@ -163,10 +158,11 @@ client.on("messageCreate", async (msg) => {
 // ================= INTERACTION =================
 client.on("interactionCreate", async (i) => {
 
+  // ================= SLASH =================
   if (i.isChatInputCommand()) {
 
     if (i.commandName === "ping")
-      return i.reply("🏓 działa");
+      return i.reply("🏓 OK");
 
     // ================= PANEL =================
     if (i.commandName === "panel") {
@@ -175,26 +171,43 @@ client.on("interactionCreate", async (i) => {
         return i.reply({ content: "❌ brak dostępu", ephemeral: true });
 
       const embed = new EmbedBuilder()
-        .setTitle("🎫 SYSTEM TICKETÓW")
+        .setTitle("🎫 SYSTEM TICKETÓW SERWERA")
         .setColor("#5865F2")
         .setDescription(
-`System ticketów:
+`📌 SYSTEM TICKETÓW
 
-• Support / Report
-• prywatne kanały
-• pełna moderacja`
+━━━━━━━━━━━━━━━━━━━━━━
+System ticketów umożliwia kontakt z administracją.
+
+Każdy ticket to prywatny kanał.
+
+━━━━━━━━━━━━━━━━━━━━━━
+📁 TWORZENIE
+
+Kliknij przycisk i wybierz kategorię.
+
+━━━━━━━━━━━━━━━━━━━━━━
+💬 KORZYSTANIE
+
+Opisz problem dokładnie.
+
+━━━━━━━━━━━━━━━━━━━━━━
+🔒 ZAMYKANIE
+
+Po rozwiązaniu problemu ticket jest zamykany,
+a transcript wysyłany na DM.
+
+━━━━━━━━━━━━━━━━━━━━━━
+⚠️ ZASADY
+
+• brak spamu
+• jeden problem = jeden ticket
+• kultura wypowiedzi`
         );
 
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId("ticket_support")
-          .setLabel("Support")
-          .setStyle(ButtonStyle.Success),
-
-        new ButtonBuilder()
-          .setCustomId("ticket_report")
-          .setLabel("Report")
-          .setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId("ticket_support").setLabel("Support").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("ticket_report").setLabel("Report").setStyle(ButtonStyle.Danger)
       );
 
       return i.reply({ embeds: [embed], components: [row] });
@@ -232,7 +245,6 @@ Dołączył: ${m.joinedAt?.toDateString()}`
     if (i.customId.startsWith("ticket")) {
 
       ticketID++;
-
       const num = ticketID.toString().padStart(4, "0");
 
       const cat = await g.channels.create({
@@ -260,7 +272,7 @@ Dołączył: ${m.joinedAt?.toDateString()}`
       const embed = new EmbedBuilder()
         .setTitle(`🎫 TICKET #${num}`)
         .setColor("#57F287")
-        .setDescription("Opisz problem. Staff został powiadomiony.");
+        .setDescription("Opisz problem, administracja została powiadomiona");
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId("claim").setLabel("Claim").setStyle(ButtonStyle.Success),
@@ -277,19 +289,22 @@ Dołączył: ${m.joinedAt?.toDateString()}`
     if (i.customId === "claim") {
 
       const t = tickets.get(i.channel.id);
+      const isOwnerRole = i.member.roles.cache.has(ROLE_OWNER);
 
-      if (i.user.id === t.owner)
-        return i.reply({ content: "❌ nie możesz przejąć swojego ticketu", ephemeral: true });
+      if (!isOwnerRole) {
+        if (i.user.id === t.owner)
+          return i.reply({ content: "❌ nie możesz przejąć swojego ticketu", ephemeral: true });
 
-      if (!maDostep(i.member))
-        return i.reply({ content: "❌ brak dostępu", ephemeral: true });
+        if (!maDostep(i.member))
+          return i.reply({ content: "❌ brak dostępu", ephemeral: true });
+      }
 
       t.claimed = true;
 
       return i.update({
         components: [
           new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId("unclaim").setLabel("Unclaim").setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId("unclaim").setLabel("Oddaj").setStyle(ButtonStyle.Secondary),
             new ButtonBuilder().setCustomId("close").setLabel("Close").setStyle(ButtonStyle.Danger)
           )
         ]
@@ -300,6 +315,10 @@ Dołączył: ${m.joinedAt?.toDateString()}`
     if (i.customId === "unclaim") {
 
       const t = tickets.get(i.channel.id);
+
+      if (!maDostep(i.member) && !i.member.roles.cache.has(ROLE_OWNER))
+        return i.reply({ content: "❌ brak dostępu", ephemeral: true });
+
       t.claimed = false;
 
       return i.update({
@@ -325,6 +344,11 @@ Dołączył: ${m.joinedAt?.toDateString()}`
       const user = await client.users.fetch(t.owner);
 
       await user.send({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle(`📁 Transcript ticketu #${t.num}`)
+            .setColor("#5865F2")
+        ],
         files: [{
           attachment: Buffer.from(log.join("\n"), "utf8"),
           name: `ticket-${t.num}.txt`
@@ -333,12 +357,12 @@ Dołączył: ${m.joinedAt?.toDateString()}`
 
       tickets.delete(i.channel.id);
 
-      await i.channel.send("❌ zamykanie...");
+      await i.channel.send("❌ zamykanie ticketu...");
 
       setTimeout(() => i.channel.delete(), 3000);
     }
   }
 });
 
-// ================= LOGIN =================
+// ================= START =================
 client.login(TOKEN);
