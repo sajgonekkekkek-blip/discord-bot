@@ -8,93 +8,90 @@ const {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  ChannelType,
-  PermissionsBitField
+  ChannelType
 } = require("discord.js");
 
 const TOKEN = process.env.TOKEN;
 
-// ================= ID / ROLE =================
+// ================= CONFIG =================
 const OWNER_ID = "1311750832374419535";
+
 const MOD_ROLE = "1497541728306204712";
 const OWNER_ROLE = "1497524742868045934";
 
+// ================= CLIENT =================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.MessageContent
   ]
 });
 
 // ================= STATE =================
-let ticketID = 0;
-const tickets = new Map();
-const confirmClose = new Map();
+let ticketCounter = 0;
+const cooldown = new Set();
+const closeConfirm = new Map();
 
-// ================= HELPERS =================
-const isOwner = (i) => i.user.id === OWNER_ID;
+// ================= PERMISSIONS =================
+function hasMod(member) {
+  if (!member) return false;
 
-const isMod = (member) =>
-  member.roles.cache.has(MOD_ROLE) ||
-  member.roles.cache.has(OWNER_ROLE);
+  return (
+    member.roles.cache.has(MOD_ROLE) ||
+    member.roles.cache.has(OWNER_ROLE) ||
+    member.id === OWNER_ID
+  );
+}
 
-// ================= SLASH COMMANDS =================
+// =====================================================
+// SLASH COMMANDS REGISTER
+// =====================================================
 const commands = [
   new SlashCommandBuilder()
     .setName("panel")
-    .setDescription("Otwiera panel ticketów"),
+    .setDescription("Panel ticketów"),
 
   new SlashCommandBuilder()
     .setName("userinfo")
     .setDescription("Informacje o użytkowniku")
     .addUserOption(o =>
-      o.setName("user")
-        .setDescription("Użytkownik")
-        .setRequired(true)
+      o.setName("user").setDescription("User").setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("clear")
     .setDescription("Czyści wiadomości")
     .addIntegerOption(o =>
-      o.setName("ilosc")
-        .setDescription("Ilość")
-        .setRequired(true)
+      o.setName("ilosc").setDescription("Ilość").setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("say")
-    .setDescription("Bot wysyła wiadomość")
+    .setDescription("Bot pisze wiadomość")
     .addStringOption(o =>
-      o.setName("text")
-        .setDescription("Treść")
-        .setRequired(true)
+      o.setName("text").setDescription("Treść").setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("ban")
-    .setDescription("Banuje użytkownika")
+    .setDescription("Ban user")
     .addUserOption(o =>
-      o.setName("user")
-        .setDescription("Użytkownik")
-        .setRequired(true)
+      o.setName("user").setDescription("User").setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("unban")
-    .setDescription("Odbanowuje użytkownika")
+    .setDescription("Unban user")
     .addStringOption(o =>
-      o.setName("id")
-        .setDescription("ID")
-        .setRequired(true)
+      o.setName("id").setDescription("ID").setRequired(true)
     )
 ].map(c => c.toJSON());
 
-// ================= READY =================
+// =====================================================
+// READY
+// =====================================================
 client.once("ready", async () => {
-
   const rest = new REST({ version: "10" }).setToken(TOKEN);
 
   await rest.put(
@@ -105,7 +102,9 @@ client.once("ready", async () => {
   console.log("BOT ONLINE");
 });
 
-// ================= INTERACTIONS =================
+// =====================================================
+// INTERACTIONS
+// =====================================================
 client.on("interactionCreate", async (i) => {
 
   if (!i.isChatInputCommand() && !i.isButton()) return;
@@ -113,17 +112,39 @@ client.on("interactionCreate", async (i) => {
   // ================= PANEL =================
   if (i.isChatInputCommand() && i.commandName === "panel") {
 
-    if (!isOwner(i))
-      return i.reply({ ephemeral: true, content: "Brak dostępu" });
-
     const embed = new EmbedBuilder()
-      .setTitle("🎫 PANEL TICKETÓW")
+      .setTitle("🎫 SYSTEM TICKETÓW")
       .setColor("#5865F2")
-      .setDescription("Kliknij aby otworzyć ticket");
+      .setDescription(
+`Ticket System:
+Ten system pozwala kontaktować się z administracją serwera.
+
+━━━━━━━━━━━━━━━━━━━━
+
+Tworzenie:
+Kliknij przycisk i stwórz prywatny kanał.
+
+━━━━━━━━━━━━━━━━━━━━
+
+Używanie:
+Opisz problem dokładnie.
+
+━━━━━━━━━━━━━━━━━━━━
+
+Zamykanie:
+Wymaga potwierdzenia.
+
+━━━━━━━━━━━━━━━━━━━━
+
+Regulamin:
+- brak spamu
+- brak multi ticketów
+- kultura`
+      );
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("ticket_help").setLabel("Pomoc").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId("ticket_report").setLabel("Zgłoszenie").setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId("ticket_report").setLabel("Report").setStyle(ButtonStyle.Danger)
     );
 
     return i.reply({ embeds: [embed], components: [row] });
@@ -132,11 +153,11 @@ client.on("interactionCreate", async (i) => {
   // ================= CREATE TICKET =================
   if (i.isButton() && (i.customId === "ticket_help" || i.customId === "ticket_report")) {
 
-    ticketID++;
-    const num = String(ticketID).padStart(4, "0");
+    ticketCounter++;
+    const id = String(ticketCounter).padStart(4, "0");
 
-    const ch = await i.guild.channels.create({
-      name: `ticket-${num}`,
+    const channel = await i.guild.channels.create({
+      name: `ticket-${id}`,
       type: ChannelType.GuildText,
       permissionOverwrites: [
         { id: i.guild.id, deny: ["ViewChannel"] },
@@ -146,16 +167,10 @@ client.on("interactionCreate", async (i) => {
       ]
     });
 
-    tickets.set(ch.id, {
-      owner: i.user.id,
-      claimed: false,
-      claimedBy: null
-    });
-
     const embed = new EmbedBuilder()
-      .setTitle(`🎫 TICKET #${num}`)
+      .setTitle(`🎫 TICKET #${id}`)
       .setColor("#57F287")
-      .setDescription("Opisz problem dokładnie.");
+      .setDescription("Opisz problem");
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("claim").setLabel("Claim").setStyle(ButtonStyle.Success),
@@ -163,31 +178,25 @@ client.on("interactionCreate", async (i) => {
       new ButtonBuilder().setCustomId("close").setLabel("Close").setStyle(ButtonStyle.Danger)
     );
 
-    await ch.send({
+    await channel.send({
       content: `<@&${MOD_ROLE}>`,
       embeds: [embed],
       components: [row]
     });
 
-    return i.reply({ ephemeral: true, content: `Ticket #${num} utworzony` });
+    return i.reply({ ephemeral: true, content: "Ticket stworzony" });
   }
 
   // ================= CLAIM =================
   if (i.isButton() && i.customId === "claim") {
 
-    if (!isMod(i.member))
+    if (!hasMod(i.member))
       return i.reply({ ephemeral: true, content: "Brak uprawnień" });
-
-    const t = tickets.get(i.channel.id);
-    if (!t) return;
-
-    t.claimed = true;
-    t.claimedBy = i.user.id;
 
     return i.channel.send({
       embeds: [
         new EmbedBuilder()
-          .setTitle("📌 Ticket przejęty")
+          .setTitle("📌 CLAIM")
           .setColor("#FEE75C")
           .setDescription(`Przejął: <@${i.user.id}>`)
       ]
@@ -197,37 +206,27 @@ client.on("interactionCreate", async (i) => {
   // ================= UNCLAIM =================
   if (i.isButton() && i.customId === "unclaim") {
 
-    if (!isMod(i.member))
+    if (!hasMod(i.member))
       return i.reply({ ephemeral: true, content: "Brak uprawnień" });
-
-    const t = tickets.get(i.channel.id);
-    if (!t) return;
-
-    t.claimed = false;
-    t.claimedBy = null;
 
     return i.channel.send({
       embeds: [
         new EmbedBuilder()
-          .setTitle("↩ Ticket oddany")
+          .setTitle("↩ UNCLAIM")
           .setColor("#FFB02E")
-          .setDescription("Ticket wrócił do administracji")
+          .setDescription("Oddano ticket")
       ]
     });
   }
 
-  // ================= CLOSE (CONFIRM BOTH SIDES) =================
+  // ================= CLOSE =================
   if (i.isButton() && i.customId === "close") {
 
-    const isAdmin = isMod(i.member);
-
-    confirmClose.set(i.channel.id, i.user.id);
+    closeConfirm.set(i.channel.id, i.user.id);
 
     return i.reply({
       ephemeral: true,
-      content: isAdmin
-        ? "Admin: na pewno zamknąć ticket?"
-        : "Czy na pewno chcesz zamknąć ticket?",
+      content: "Na pewno zamknąć?",
       components: [
         new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId("yes_close").setLabel("Tak").setStyle(ButtonStyle.Danger),
@@ -238,165 +237,56 @@ client.on("interactionCreate", async (i) => {
   }
 
   if (i.customId === "yes_close") {
+    if (closeConfirm.get(i.channel.id) !== i.user.id) return;
 
-    if (confirmClose.get(i.channel.id) !== i.user.id) return;
-
-    tickets.delete(i.channel.id);
-    confirmClose.delete(i.channel.id);
-
-    await i.channel.send("Zamykanie ticketa...");
+    await i.channel.send("Zamykanie...");
     setTimeout(() => i.channel.delete(), 2000);
   }
 
   if (i.customId === "no_close") {
-    confirmClose.delete(i.channel.id);
     return i.update({ content: "Anulowano", components: [] });
   }
 });
 
-// ================= SLASH COMMANDS =================
-client.on("interactionCreate", async (i) => {
+// =====================================================
+// W1–W5 (MESSAGE)
+// =====================================================
+client.on("messageCreate", async (m) => {
+  if (m.author.bot) return;
 
-  if (!i.isChatInputCommand()) return;
-
-  // USERINFO
-  if (i.commandName === "userinfo") {
-
-    const u = i.options.getUser("user");
-
-    return i.reply({
-      ephemeral: true,
-      embeds: [
-        new EmbedBuilder()
-          .setTitle("USER INFO")
-          .setColor("#5865F2")
-          .setDescription(`User: ${u.tag}\nID: ${u.id}`)
-      ]
-    });
-  }
-
-  // CLEAR
-  if (i.commandName === "clear") {
-
-    if (!isOwner(i))
-      return i.reply({ ephemeral: true, content: "Brak dostępu" });
-
-    const amount = i.options.getInteger("ilosc");
-
-    const msgs = await i.channel.bulkDelete(amount, true);
-
-    return i.reply({ ephemeral: true, content: `Usunięto ${msgs.size}` });
-  }
-
-  // SAY
-  if (i.commandName === "say") {
-
-    if (!isOwner(i))
-      return i.reply({ ephemeral: true, content: "Brak dostępu" });
-
-    const text = i.options.getString("text");
-
-    await i.reply({ ephemeral: true, content: "Wysłano" });
-    return i.channel.send(text);
-  }
-
-  // BAN
-  if (i.commandName === "ban") {
-
-    if (!isMod(i.member))
-      return i.reply({ ephemeral: true, content: "Brak dostępu" });
-
-    const user = i.options.getUser("user");
-
-    await i.guild.members.ban(user.id);
-
-    return i.reply({ ephemeral: true, content: `Zbanowano ${user.tag}` });
-  }
-
-  // UNBAN
-  if (i.commandName === "unban") {
-
-    if (!isMod(i.member))
-      return i.reply({ ephemeral: true, content: "Brak dostępu" });
-
-    const id = i.options.getString("id");
-
-    await i.guild.members.unban(id);
-
-    return i.reply({ ephemeral: true, content: `Unban ${id}` });
-  }
-});
-const cooldown = new Set();
-
-client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
-
-  const allowedMods = [
-    MOD_ROLE,
-    OWNER_ROLE
-  ];
-
-  const member = message.member;
+  const member = m.member;
   if (!member) return;
 
-  const hasPerm =
-    member.roles.cache.has(MOD_ROLE) ||
-    member.roles.cache.has(OWNER_ROLE) ||
-    member.id === OWNER_ID;
+  const cmd = m.content.toLowerCase();
 
-  // cooldown 10s na spam w1-w5
-  if (cooldown.has(message.author.id)) return;
+  const run = async (roles, label) => {
 
-  const callRole = async (roles, label) => {
-    if (!hasPerm) return;
+    if (!hasMod(member)) return;
 
-    cooldown.add(message.author.id);
-    setTimeout(() => cooldown.delete(message.author.id), 10000);
+    if (cooldown.has(m.author.id))
+      return m.reply("Cooldown 10s");
 
-    const roleMentions = roles.map(r => `<@&${r}>`).join(" ");
+    cooldown.add(m.author.id);
+    setTimeout(() => cooldown.delete(m.author.id), 10000);
 
-    await message.channel.send({
+    await m.channel.send({
       embeds: [
-        {
-          title: "🚨 WEZWANIE ADMINISTRACJI",
-          color: 0xff3b3b,
-          description:
-            `**Wywołane przez:** <@${message.author.id}>\n` +
-            `**Typ:** ${label}\n\n` +
-            `Zespół administracyjny został powiadomiony.`,
-          footer: { text: "System powiadomień MOD" }
-        }
+        new EmbedBuilder()
+          .setTitle("🚨 ALERT")
+          .setColor("#FF3B3B")
+          .setDescription(`User: <@${m.author.id}>\nTyp: ${label}`)
       ]
     });
 
-    await message.channel.send(roleMentions);
+    await m.channel.send(roles.map(r => `<@&${r}>`).join(" "));
   };
 
-  if (message.content === "!w1")
-    return callRole(["1497527981822709840"], "W1 - Niski priorytet");
-
-  if (message.content === "!w2")
-    return callRole(
-      ["1497527830559588452", "1497527748997157015"],
-      "W2 - Średni priorytet"
-    );
-
-  if (message.content === "!w3")
-    return callRole(
-      ["1497527663781351495", "1497527565617729587", "1497527457622790214"],
-      "W3 - Wysoki priorytet"
-    );
-
-  if (message.content === "!w4")
-    return callRole(
-      ["1497527300848091288", "1497527197886447656"],
-      "W4 - Bardzo wysoki priorytet"
-    );
-
-  if (message.content === "!w5")
-    return callRole(
-      ["1497528458711138406", "1497529283537797130", "1497529477150933023"],
-      "W5 - Krytyczny alert"
-    );
+  if (cmd === "!w1") return run(["1497527981822709840"], "W1");
+  if (cmd === "!w2") return run(["1497527830559588452","1497527748997157015"], "W2");
+  if (cmd === "!w3") return run(["1497527663781351495","1497527565617729587","1497527457622790214"], "W3");
+  if (cmd === "!w4") return run(["1497527300848091288","1497527197886447656"], "W4");
+  if (cmd === "!w5") return run(["1497528458711138406","1497529283537797130","1497529477150933023"], "W5");
 });
+
+// =====================================================
 client.login(TOKEN);
