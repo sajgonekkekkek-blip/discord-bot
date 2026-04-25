@@ -20,7 +20,7 @@ const TOKEN = process.env.TOKEN;
 const ROLE_OWNER = "1497524742868045934";
 const ROLE_MOD = "1497541728306204712";
 
-// staff calls
+// wezwania
 const W1 = "1497527981822709840";
 const W2 = ["1497527830559588452","1497527748997157015"];
 const W3 = ["1497527663781351495","1497527565617729587","1497527457622790214"];
@@ -30,26 +30,21 @@ const W5 = ["1497528458711138406","1497529283537797130","1497529477150933023"];
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.GuildMembers,
     GatewayIntentBits.MessageContent
   ]
 });
 
-// ================= SAFE STATE =================
+// ================= STATE =================
 let ticketID = 0;
 const tickets = new Map();
 const cooldown = new Map();
 const pendingClose = new Map();
 
-// ================= SAFE FUNCTIONS =================
-const safeText = (t) => typeof t === "string" ? t : "Brak danych";
-
+// ================= HELPERS =================
 const isMod = (m) =>
   m.roles.cache.has(ROLE_MOD) || m.roles.cache.has(ROLE_OWNER);
-
-const isOwner = (m) =>
-  m.roles.cache.has(ROLE_OWNER);
 
 // ================= TRANSCRIPT =================
 async function transcript(channel) {
@@ -76,9 +71,9 @@ body{background:#2b2d31;color:white;font-family:Arial;padding:20px}
   for (const m of sorted) {
     html += `
 <div class="msg">
-<div class="a">${safeText(m.author?.tag)}</div>
+<div class="a">${m.author?.tag || "unknown"}</div>
 <div class="t">${new Date(m.createdTimestamp).toLocaleString()}</div>
-<div>${safeText(m.content)}</div>
+<div>${m.content || "[embed]"}</div>
 </div>`;
   }
 
@@ -90,35 +85,10 @@ body{background:#2b2d31;color:white;font-family:Arial;padding:20px}
   return file;
 }
 
-// ================= COMMANDS (SAFE - NO UNDEFINED) =================
+// ================= SLASH COMMANDS =================
 const commands = [
-
-  new SlashCommandBuilder()
-    .setName("ping")
-    .setDescription("Ping bota"),
-
-  new SlashCommandBuilder()
-    .setName("panel")
-    .setDescription("Panel ticketów"),
-
-  new SlashCommandBuilder()
-    .setName("userinfo")
-    .setDescription("Informacje o użytkowniku")
-    .addUserOption(o =>
-      o.setName("user")
-        .setDescription("Użytkownik")
-        .setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName("clear")
-    .setDescription("Czyści wiadomości")
-    .addIntegerOption(o =>
-      o.setName("ilosc")
-        .setDescription("Ilość")
-        .setRequired(true)
-    )
-
+  new SlashCommandBuilder().setName("panel").setDescription("Panel ticketów"),
+  new SlashCommandBuilder().setName("ping").setDescription("Ping bota")
 ].map(c => c.toJSON());
 
 // ================= READY =================
@@ -134,11 +104,10 @@ client.once("ready", async () => {
   console.log("BOT ONLINE");
 });
 
-// ================= MESSAGE (WEZWANIA) =================
+// ================= WEZWANIA =================
 client.on("messageCreate", async (msg) => {
 
   if (msg.author.bot) return;
-
   if (!msg.content.startsWith("!w")) return;
 
   const t = tickets.get(msg.channel.id);
@@ -146,9 +115,6 @@ client.on("messageCreate", async (msg) => {
 
   if (!isMod(msg.member))
     return msg.reply("Brak uprawnień");
-
-  if (t.claimed)
-    return msg.reply("Ticket przejęty");
 
   const cd = cooldown.get(msg.author.id) || 0;
   if (Date.now() - cd < 15000)
@@ -168,9 +134,9 @@ client.on("messageCreate", async (msg) => {
     content: roles.map(r => `<@&${r}>`).join(" "),
     embeds: [
       new EmbedBuilder()
-        .setTitle("Wezwanie")
+        .setTitle("Wezwanie administracji")
         .setColor("#ED4245")
-        .setDescription(msg.author.tag)
+        .setDescription(`Wzywa: ${msg.author.tag}`)
     ]
   });
 });
@@ -187,9 +153,20 @@ client.on("interactionCreate", async (i) => {
       return i.reply({ content:"Brak dostępu", ephemeral:true });
 
     const embed = new EmbedBuilder()
-      .setTitle("PANEL TICKETÓW")
+      .setTitle("🎫 PANEL TICKETÓW")
       .setColor("#5865F2")
-      .setDescription("Kliknij przycisk aby otworzyć ticket");
+      .setDescription(
+`━━━━━━━━━━━━━━━━━━━━
+SYSTEM TICKETÓW
+
+Kliknij aby otworzyć ticket.
+
+━━━━━━━━━━━━━━━━━━━━
+ZASADY:
+• Nie spamuj
+• Jeden problem = jeden ticket
+• Opisz dokładnie sytuację`
+      );
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("ticket_help").setLabel("Pomoc").setStyle(ButtonStyle.Success),
@@ -205,6 +182,8 @@ client.on("interactionCreate", async (i) => {
     ticketID++;
     const num = String(ticketID).padStart(4,"0");
 
+    const isReport = i.customId === "ticket_report";
+
     const ch = await i.guild.channels.create({
       name:`ticket-${num}`,
       type:ChannelType.GuildText,
@@ -218,34 +197,110 @@ client.on("interactionCreate", async (i) => {
 
     tickets.set(ch.id,{
       owner:i.user.id,
-      claimed:false
+      claimed:false,
+      claimedBy:null
     });
 
     const embed = new EmbedBuilder()
       .setTitle(`TICKET #${num}`)
       .setColor("#57F287")
-      .setDescription("Opisz problem");
+      .setDescription(
+`━━━━━━━━━━━━━━━━━━━━
+📌 TICKET SYSTEM
+
+Status: OTWARTY
+Numer: #${num}
+
+━━━━━━━━━━━━━━━━━━━━
+OPIS:
+Opisz problem dokładnie
+
+━━━━━━━━━━━━━━━━━━━━`
+      );
+
+    if (isReport) {
+      await ch.send({
+        content:`<@&${ROLE_MOD}>`,
+        embeds:[
+          new EmbedBuilder()
+            .setTitle("📢 ZGŁOSZENIE")
+            .setColor("#ED4245")
+            .setDescription(
+`Użytkownik: <@${i.user.id}>
+ID: ${i.user.id}
+
+Opisz sytuację i dodaj dowody`
+            )
+        ]
+      });
+    }
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId("claim").setLabel("Przejmij").setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId("unclaim").setLabel("Oddaj").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId("claim").setLabel("📌 Claim").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("unclaim").setLabel("↩ Unclaim").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("close").setLabel("🔒 Close").setStyle(ButtonStyle.Danger)
     );
 
-    await ch.send({ embeds:[embed], components:[row] });
+    await ch.send({
+      content:`<@&${ROLE_MOD}>`,
+      embeds:[embed],
+      components:[row]
+    });
 
-    return i.reply({ content:`Ticket ${num}`, ephemeral:true });
+    return i.reply({ content:`Ticket #${num} utworzony`, ephemeral:true });
   }
 
   // ================= CLAIM =================
   if (i.isButton() && i.customId === "claim") {
 
     if (!isMod(i.member))
-      return i.reply({ ephemeral:true, content:"Brak dostępu" });
+      return i.reply({ ephemeral:true, content:"Brak uprawnień" });
 
-    tickets.get(i.channel.id).claimed = true;
+    const t = tickets.get(i.channel.id);
+    if (!t) return;
 
-    return i.update({ components:[] });
+    t.claimed = true;
+    t.claimedBy = i.user.id;
+
+    const embed = new EmbedBuilder()
+      .setTitle("TICKET PRZEJĘTY")
+      .setColor("#FEE75C")
+      .setDescription(`Przejął: <@${i.user.id}>`);
+
+    await i.update({
+      components:[
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("unclaim").setLabel("↩ Unclaim").setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId("close").setLabel("🔒 Close").setStyle(ButtonStyle.Danger)
+        )
+      ]
+    });
+
+    return i.channel.send({ embeds:[embed] });
+  }
+
+  // ================= UNCLAIM =================
+  if (i.isButton() && i.customId === "unclaim") {
+
+    if (!isMod(i.member))
+      return i.reply({ ephemeral:true, content:"Brak uprawnień" });
+
+    const t = tickets.get(i.channel.id);
+    if (!t) return;
+
+    t.claimed = false;
+    t.claimedBy = null;
+
+    await i.update({
+      components:[
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("claim").setLabel("📌 Claim").setStyle(ButtonStyle.Success),
+          new ButtonBuilder().setCustomId("close").setLabel("🔒 Close").setStyle(ButtonStyle.Danger)
+        )
+      ]
+    });
+
+    return i.channel.send("Ticket oddany do puli.");
   }
 
   // ================= CLOSE =================
@@ -257,12 +312,12 @@ client.on("interactionCreate", async (i) => {
 
       const file = await transcript(i.channel);
 
-      const u = await client.users.fetch(t.owner).catch(()=>null);
-      if (u) u.send({ files:[file] });
+      const user = await client.users.fetch(t.owner).catch(()=>null);
+      if (user) user.send({ files:[file] }).catch(()=>{});
 
       tickets.delete(i.channel.id);
 
-      await i.channel.send("Zamykam...");
+      await i.channel.send("Zamykanie...");
       return setTimeout(()=>i.channel.delete(),2000);
     }
 
@@ -283,19 +338,17 @@ client.on("interactionCreate", async (i) => {
   if (i.customId === "yes") {
 
     const t = tickets.get(i.channel.id);
-
-    if (pendingClose.get(i.channel.id) !== i.user.id)
-      return;
+    if (pendingClose.get(i.channel.id) !== i.user.id) return;
 
     const file = await transcript(i.channel);
 
-    const u = await client.users.fetch(t.owner).catch(()=>null);
-    if (u) u.send({ files:[file] });
+    const user = await client.users.fetch(t.owner).catch(()=>null);
+    if (user) user.send({ files:[file] }).catch(()=>{});
 
     tickets.delete(i.channel.id);
     pendingClose.delete(i.channel.id);
 
-    await i.channel.send("Zamykam...");
+    await i.channel.send("Zamykanie...");
     setTimeout(()=>i.channel.delete(),2000);
   }
 
