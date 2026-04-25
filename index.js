@@ -12,58 +12,45 @@ const {
   ChannelType
 } = require("discord.js");
 
-// ================= CONFIG =================
 const TOKEN = process.env.TOKEN;
 
+// ================= ROLES =================
 const OWNER_ROLE = "1497524742868045934";
 const MOD_ROLE = "1497541728306204712";
-
-const LOG_CHANNEL_NAME = "logs";
-const TICKET_CATEGORY_NAME = "🎫・TICKETS";
 
 // ================= CLIENT =================
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
 });
 
-// ================= SLASH COMMANDS =================
+// ================= COMMANDS =================
 const commands = [
   new SlashCommandBuilder().setName("ping").setDescription("🏓 Pong"),
 
   new SlashCommandBuilder()
     .setName("ban")
     .setDescription("🔨 Ban user")
-    .addUserOption(o =>
-      o.setName("user").setDescription("User").setRequired(true)
-    ),
+    .addUserOption(o => o.setName("user").setDescription("user").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("kick")
     .setDescription("👢 Kick user")
-    .addUserOption(o =>
-      o.setName("user").setDescription("User").setRequired(true)
-    ),
+    .addUserOption(o => o.setName("user").setDescription("user").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("clear")
-    .setDescription("🧹 usuwa wiadomości")
-    .addIntegerOption(o =>
-      o.setName("ilosc").setDescription("Ilość").setRequired(true)
-    ),
+    .setDescription("🧹 clear messages")
+    .addIntegerOption(o => o.setName("ilosc").setDescription("ile").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("say")
-    .setDescription("📢 bot embed")
-    .addStringOption(o =>
-      o.setName("text").setDescription("Tekst").setRequired(true)
-    ),
+    .setDescription("📢 bot message")
+    .addStringOption(o => o.setName("text").setDescription("text").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("userinfo")
-    .setDescription("👤 info o userze")
-    .addUserOption(o =>
-      o.setName("user").setDescription("User").setRequired(true)
-    ),
+    .setDescription("👤 user info")
+    .addUserOption(o => o.setName("user").setDescription("user").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("panel")
@@ -81,7 +68,7 @@ client.once("ready", async () => {
     { body: commands }
   );
 
-  console.log("Slash commands gotowe");
+  console.log("Slash commands READY");
 });
 
 // ================= PERMISSIONS =================
@@ -92,17 +79,10 @@ function hasPerm(member) {
   );
 }
 
-// ================= LOGS =================
-async function log(guild, text) {
-  const channel = guild.channels.cache.find(c => c.name === LOG_CHANNEL_NAME);
-  if (!channel) return;
-  channel.send(`📋 ${text}`);
-}
-
 // ================= INTERACTIONS =================
 client.on("interactionCreate", async (interaction) => {
 
-  // ===== SLASH =====
+  // ================= SLASH =================
   if (interaction.isChatInputCommand()) {
 
     const member = interaction.member;
@@ -121,8 +101,6 @@ client.on("interactionCreate", async (interaction) => {
       const target = await interaction.guild.members.fetch(user.id);
 
       await target.ban();
-
-      log(interaction.guild, `Ban: ${user.tag}`);
 
       return interaction.reply({
         embeds: [
@@ -143,8 +121,6 @@ client.on("interactionCreate", async (interaction) => {
       const target = await interaction.guild.members.fetch(user.id);
 
       await target.kick();
-
-      log(interaction.guild, `Kick: ${user.tag}`);
 
       return interaction.reply({
         embeds: [
@@ -194,9 +170,7 @@ client.on("interactionCreate", async (interaction) => {
           new EmbedBuilder()
             .setTitle("👤 USER INFO")
             .setDescription(
-              `**Nick:** ${user.tag}\n` +
-              `**ID:** ${user.id}\n` +
-              `**Joined:** ${member.joinedAt}`
+              `Nick: ${user.tag}\nID: ${user.id}\nJoined: ${member.joinedAt}`
             )
             .setColor("Gold")
         ]
@@ -209,11 +183,12 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({
         embeds: [
           new EmbedBuilder()
-            .setTitle("🎫 Support Center")
+            .setTitle("🎫 SUPPORT CENTER")
             .setDescription(
-              "📜 REGULAMIN:\n" +
-              "• Nie spamuj ticketów\n" +
-              "• Opisz problem dokładnie\n\n" +
+              "📜 REGULAMIN TICKETÓW:\n" +
+              "• Nie spamuj\n" +
+              "• Opisz problem dokładnie\n" +
+              "• Szanuj administrację\n\n" +
               "Wybierz kategorię:"
             )
             .setColor("#2b2d31")
@@ -223,34 +198,42 @@ client.on("interactionCreate", async (interaction) => {
             new ButtonBuilder()
               .setCustomId("ticket_support")
               .setLabel("💬 Support")
+              .setEmoji("💬")
               .setStyle(ButtonStyle.Primary),
 
             new ButtonBuilder()
               .setCustomId("ticket_report")
               .setLabel("🚨 Report")
-              .setStyle(ButtonStyle.Danger)
+              .setEmoji("🚨")
+              .setStyle(ButtonStyle.Danger),
+
+            new ButtonBuilder()
+              .setCustomId("ticket_other")
+              .setLabel("❓ Other")
+              .setEmoji("❓")
+              .setStyle(ButtonStyle.Secondary)
           )
         ]
       });
     }
   }
 
-  // ===== BUTTONS =====
+  // ================= BUTTONS =================
   if (interaction.isButton()) {
 
     const guild = interaction.guild;
 
-    // CREATE CATEGORY IF NOT EXISTS
-    let category = guild.channels.cache.find(c => c.name === TICKET_CATEGORY_NAME);
+    // CREATE CATEGORY
+    let category = guild.channels.cache.find(c => c.name === "🎫・TICKETS");
 
     if (!category) {
       category = await guild.channels.create({
-        name: TICKET_CATEGORY_NAME,
+        name: "🎫・TICKETS",
         type: ChannelType.GuildCategory
       });
     }
 
-    // CREATE TICKET
+    // ================= CREATE TICKET =================
     if (interaction.customId.startsWith("ticket_")) {
 
       const channel = await guild.channels.create({
@@ -268,34 +251,46 @@ client.on("interactionCreate", async (interaction) => {
               PermissionsBitField.Flags.ViewChannel,
               PermissionsBitField.Flags.SendMessages
             ]
+          },
+          {
+            id: MOD_ROLE,
+            allow: [
+              PermissionsBitField.Flags.ViewChannel,
+              PermissionsBitField.Flags.SendMessages
+            ]
           }
         ]
       });
 
       const embed = new EmbedBuilder()
-        .setTitle("🎫 Ticket Opened")
+        .setTitle("🎫 TICKET OPENED")
         .setDescription(
-          "👋 Witaj!\n\n" +
-          "🧠 Opisz swój problem\n" +
-          "⏳ Czekaj na administrację\n\n" +
-          "🔥 Przyciski:"
+          "👋 Witaj w systemie wsparcia!\n\n" +
+          "📌 Status: 🟢 Open\n" +
+          "🔔 Administracja została powiadomiona\n\n" +
+          "📜 Instrukcje:\n" +
+          "• Opisz problem\n" +
+          "• Nie spamuj\n\n" +
+          "━━━━━━━━━━━━━━━━━━━━━━"
         )
-        .setColor("Green");
+        .setColor("#57F287");
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId("claim")
-          .setLabel("🙋 Claim")
+          .setLabel("🔓 Claim")
+          .setEmoji("🔓")
           .setStyle(ButtonStyle.Success),
 
         new ButtonBuilder()
           .setCustomId("close")
           .setLabel("❌ Close")
+          .setEmoji("❌")
           .setStyle(ButtonStyle.Danger)
       );
 
       channel.send({
-        content: `<@${interaction.user.id}>`,
+        content: `<@&${MOD_ROLE}> <@${interaction.user.id}>`,
         embeds: [embed],
         components: [row]
       });
@@ -303,14 +298,42 @@ client.on("interactionCreate", async (interaction) => {
       return interaction.reply({ content: "🎫 Ticket utworzony!", ephemeral: true });
     }
 
-    // CLAIM
+    // ================= CLAIM =================
     if (interaction.customId === "claim") {
-      return interaction.channel.send(`🙋 Ticket przejęty przez ${interaction.user}`);
+
+      const embed = new EmbedBuilder()
+        .setTitle("🔒 TICKET PRZEJĘTY")
+        .setDescription(
+          `🔒 Status: CLAIMED\n` +
+          `👮 Moderator: ${interaction.user.tag}`
+        )
+        .setColor("#FEE75C");
+
+      await interaction.update({
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder()
+              .setCustomId("claimed")
+              .setLabel("🔒 Przejęty")
+              .setStyle(ButtonStyle.Secondary)
+              .setDisabled(true),
+
+            new ButtonBuilder()
+              .setCustomId("close")
+              .setLabel("❌ Close")
+              .setStyle(ButtonStyle.Danger)
+          )
+        ]
+      });
+
+      return interaction.channel.send({ embeds: [embed] });
     }
 
-    // CLOSE
+    // ================= CLOSE =================
     if (interaction.customId === "close") {
-      await interaction.channel.send("❌ Zamykam ticket...");
+
+      await interaction.channel.send("❌ Ticket zamykany...");
+
       setTimeout(() => interaction.channel.delete(), 5000);
     }
   }
