@@ -1,6 +1,6 @@
 {
   "name": "discord-bot-pro-pl",
-  "version": "5.2.0",
+  "version": "6.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
