@@ -1,13 +1,10 @@
 {
   "name": "discord-bot-pro",
-  "version": "10.0.0",
+  "version": "10.2.0",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
     "start": "node index.js"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   },
   "dependencies": {
     "discord.js": "^14.16.3"
