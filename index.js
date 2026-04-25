@@ -12,17 +12,24 @@ const {
   ChannelType
 } = require("discord.js");
 
-// ================= TOKEN =================
 const TOKEN = process.env.TOKEN;
 
-// ================= ROLE =================
+// ================= ROLES =================
 const OWNER_ROLE = "1497524742868045934";
 const MOD_ROLE = "1497541728306204712";
 
 // ================= CLIENT =================
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
 });
+
+// ================= SIMPLE XP SYSTEM =================
+const xp = new Map();
 
 // ================= COMMANDS =================
 const commands = [
@@ -30,32 +37,26 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("ban")
-    .setDescription("🔨 Ban user")
+    .setDescription("🔨 ban user")
     .addUserOption(o => o.setName("user").setDescription("user").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("kick")
-    .setDescription("👢 Kick user")
+    .setDescription("👢 kick user")
     .addUserOption(o => o.setName("user").setDescription("user").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("clear")
-    .setDescription("🧹 usuwa wiadomości")
-    .addIntegerOption(o => o.setName("ilosc").setDescription("ile").setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName("say")
-    .setDescription("📢 bot mówi embedem")
-    .addStringOption(o => o.setName("text").setDescription("tekst").setRequired(true)),
-
-  new SlashCommandBuilder()
-    .setName("userinfo")
-    .setDescription("👤 info usera")
-    .addUserOption(o => o.setName("user").setDescription("user").setRequired(true)),
+    .setDescription("🧹 clear messages")
+    .addIntegerOption(o => o.setName("ilosc").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("panel")
-    .setDescription("🎫 ticket panel")
+    .setDescription("🎫 ticket panel"),
+
+  new SlashCommandBuilder()
+    .setName("rank")
+    .setDescription("📊 twój poziom")
 ].map(c => c.toJSON());
 
 // ================= REGISTER =================
@@ -69,7 +70,7 @@ client.once("ready", async () => {
     { body: commands }
   );
 
-  console.log("Slash commands READY");
+  console.log("READY V3 PRO");
 });
 
 // ================= PERMISSIONS =================
@@ -80,6 +81,47 @@ function hasPerm(member) {
   );
 }
 
+// ================= LOG CHANNEL =================
+async function log(guild, text) {
+  const channel = guild.channels.cache.find(c => c.name === "logs");
+  if (channel) channel.send(`📋 ${text}`);
+}
+
+// ================= XP SYSTEM =================
+client.on("messageCreate", async (message) => {
+  if (message.author.bot) return;
+
+  const id = message.author.id;
+  const data = xp.get(id) || { xp: 0, lvl: 0 };
+
+  data.xp += 5;
+
+  if (data.xp >= 100) {
+    data.lvl++;
+    data.xp = 0;
+
+    message.channel.send(`📊 ${message.author} awansował na lvl ${data.lvl}`);
+  }
+
+  xp.set(id, data);
+
+  // ================= AUTOMOD =================
+  const msg = message.content.toLowerCase();
+
+  if (/(https?:\/\/)/.test(msg)) {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+      await message.delete();
+      return message.channel.send(`🚫 ${message.author} linki są zablokowane`);
+    }
+  }
+
+  if (msg === msg.toUpperCase() && msg.length > 6) {
+    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+      return message.channel.send(`⚠️ ${message.author} nie krzycz`);
+    }
+  }
+});
+
 // ================= INTERACTIONS =================
 client.on("interactionCreate", async (interaction) => {
 
@@ -88,7 +130,6 @@ client.on("interactionCreate", async (interaction) => {
 
     const member = interaction.member;
 
-    // PING
     if (interaction.commandName === "ping") {
       return interaction.reply("🏓 Pong!");
     }
@@ -103,14 +144,9 @@ client.on("interactionCreate", async (interaction) => {
 
       await target.ban();
 
-      return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle("🔨 BAN")
-            .setDescription(`${user.tag} został zbanowany`)
-            .setColor("Red")
-        ]
-      });
+      log(interaction.guild, `Ban: ${user.tag}`);
+
+      return interaction.reply(`🔨 zbanowano ${user.tag}`);
     }
 
     // KICK
@@ -123,14 +159,9 @@ client.on("interactionCreate", async (interaction) => {
 
       await target.kick();
 
-      return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle("👢 KICK")
-            .setDescription(`${user.tag} został wyrzucony`)
-            .setColor("Orange")
-        ]
-      });
+      log(interaction.guild, `Kick: ${user.tag}`);
+
+      return interaction.reply(`👢 wyrzucono ${user.tag}`);
     }
 
     // CLEAR
@@ -140,72 +171,24 @@ client.on("interactionCreate", async (interaction) => {
 
       const amount = interaction.options.getInteger("ilosc");
 
-      await interaction.channel.bulkDelete(amount, true);
+      await interaction.channel.bulkDelete(amount);
 
       return interaction.reply({ content: `🧹 usunięto ${amount}`, ephemeral: true });
     }
 
-    // SAY
-    if (interaction.commandName === "say") {
+    // PANEL
+    if (interaction.commandName === "panel") {
+
       if (!hasPerm(member))
         return interaction.reply({ content: "❌ brak permisji", ephemeral: true });
 
-      const text = interaction.options.getString("text");
-
-      return interaction.channel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setDescription(text)
-            .setColor("#5865F2")
-        ]
-      });
-    }
-
-    // USERINFO
-    if (interaction.commandName === "userinfo") {
-      const user = interaction.options.getUser("user");
-      const member = await interaction.guild.members.fetch(user.id);
-
-      return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle("👤 USER INFO")
-            .setDescription(
-              `Nick: ${user.tag}\nID: ${user.id}\nJoined: ${member.joinedAt}`
-            )
-            .setColor("Gold")
-        ]
-      });
-    }
-
-    // ================= PANEL (HIDDEN STYLE) =================
-    if (interaction.commandName === "panel") {
-
-      if (!hasPerm(interaction.member))
-        return interaction.reply({ content: "❌ brak permisji", ephemeral: true });
+      await interaction.deferReply({ ephemeral: true });
 
       const embed = new EmbedBuilder()
         .setTitle("🎫 Ticket System")
         .setDescription(
-          "━━━━━━━━━━━━━━━━━━━━\n" +
-          "📌 **System Ticketów**\n\n" +
-          "System ticketów pozwala na kontakt z administracją serwera w celu uzyskania pomocy, pytań lub zgłoszeń.\n\n" +
-          "━━━━━━━━━━━━━━━━━━━━\n\n" +
-
-          "🟢 Tworzenie ticketu\n" +
-          "Kliknij przycisk aby utworzyć prywatny kanał z administracją.\n\n" +
-
-          "💬 Używanie ticketu\n" +
-          "Opisz swój problem dokładnie i dodaj potrzebne informacje.\n\n" +
-
-          "🔒 Zamknięcie ticketu\n" +
-          "Ticket zamyka administracja lub użytkownik (jeśli dostępne).\n\n" +
-
-          "📜 Zasady:\n" +
-          "• Nie spamuj\n" +
-          "• Nie twórz wielu ticketów\n" +
-          "• Szanuj administrację\n\n" +
-          "━━━━━━━━━━━━━━━━━━━━"
+          "System ticketów pozwala kontaktować się z administracją.\n\n" +
+          "Kliknij przycisk aby stworzyć prywatny kanał."
         )
         .setColor("#2b2d31");
 
@@ -213,30 +196,31 @@ client.on("interactionCreate", async (interaction) => {
         new ButtonBuilder()
           .setCustomId("ticket_support")
           .setLabel("💬 Support")
-          .setEmoji("💬")
           .setStyle(ButtonStyle.Primary),
 
         new ButtonBuilder()
           .setCustomId("ticket_report")
           .setLabel("🚨 Report")
-          .setEmoji("🚨")
-          .setStyle(ButtonStyle.Danger),
-
-        new ButtonBuilder()
-          .setCustomId("ticket_other")
-          .setLabel("❓ Other")
-          .setEmoji("❓")
-          .setStyle(ButtonStyle.Secondary)
+          .setStyle(ButtonStyle.Danger)
       );
 
-      await interaction.deferReply({ ephemeral: true });
+      await interaction.channel.send({ embeds: [embed], components: [row] });
 
-      await interaction.channel.send({
-        embeds: [embed],
-        components: [row]
+      return interaction.editReply("✅ panel wysłany");
+    }
+
+    // RANK
+    if (interaction.commandName === "rank") {
+      const data = xp.get(interaction.user.id) || { xp: 0, lvl: 0 };
+
+      return interaction.reply({
+        embeds: [
+          new EmbedBuilder()
+            .setTitle("📊 Twój poziom")
+            .setDescription(`Level: ${data.lvl}\nXP: ${data.xp}/100`)
+            .setColor("Blue")
+        ]
       });
-
-      return interaction.editReply("✅ Panel wysłany");
     }
   }
 
@@ -254,7 +238,7 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // ================= CREATE TICKET =================
+    // ================= TICKET CREATE =================
     if (interaction.customId.startsWith("ticket_")) {
 
       const channel = await guild.channels.create({
@@ -263,31 +247,17 @@ client.on("interactionCreate", async (interaction) => {
         parent: category.id,
         permissionOverwrites: [
           { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-          {
-            id: interaction.user.id,
-            allow: [
-              PermissionsBitField.Flags.ViewChannel,
-              PermissionsBitField.Flags.SendMessages
-            ]
-          },
-          {
-            id: MOD_ROLE,
-            allow: [
-              PermissionsBitField.Flags.ViewChannel,
-              PermissionsBitField.Flags.SendMessages
-            ]
-          }
+          { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+          { id: MOD_ROLE, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
         ]
       });
 
       const embed = new EmbedBuilder()
-        .setTitle("🎫 TICKET OTWARTY")
+        .setTitle("🎫 TICKET OPENED")
         .setDescription(
-          "👋 Witaj!\n\n" +
-          "📌 Status: 🟢 OPEN\n" +
-          "🔔 Administracja została powiadomiona\n\n" +
-          "📜 Opisz swój problem dokładnie\n\n" +
-          "━━━━━━━━━━━━━━━━━━━━"
+          "📌 Status: OPEN\n" +
+          "🔔 Staff powiadomiony\n\n" +
+          "Opisz problem dokładnie."
         )
         .setColor("#57F287");
 
@@ -295,13 +265,11 @@ client.on("interactionCreate", async (interaction) => {
         new ButtonBuilder()
           .setCustomId("claim")
           .setLabel("🔓 Claim")
-          .setEmoji("🔓")
           .setStyle(ButtonStyle.Success),
 
         new ButtonBuilder()
           .setCustomId("close")
           .setLabel("❌ Close")
-          .setEmoji("❌")
           .setStyle(ButtonStyle.Danger)
       );
 
@@ -311,7 +279,7 @@ client.on("interactionCreate", async (interaction) => {
         components: [row]
       });
 
-      return interaction.reply({ content: "🎫 Ticket stworzony", ephemeral: true });
+      return interaction.reply({ content: "🎫 ticket stworzony", ephemeral: true });
     }
 
     // ================= CLAIM =================
@@ -334,17 +302,15 @@ client.on("interactionCreate", async (interaction) => {
         ]
       });
 
-      return interaction.channel.send(
-        `🔒 Ticket przejęty przez ${interaction.user}`
-      );
+      return interaction.channel.send(`🔒 ticket przejęty przez ${interaction.user}`);
     }
 
     // ================= CLOSE =================
     if (interaction.customId === "close") {
 
-      await interaction.channel.send("❌ Zamykam ticket...");
+      await interaction.channel.send("❌ zamykanie ticketu...");
 
-      setTimeout(() => interaction.channel.delete(), 5000);
+      setTimeout(() => interaction.channel.delete(), 4000);
     }
   }
 });
