@@ -1,12 +1,16 @@
 {
-  "name": "discord-bot-pro-pl",
-  "version": "6.2.0",
+  "name": "discord-bot-pro",
+  "version": "6.6.0",
+  "description": "Profesjonalny bot Discord - ticket system + moderacja",
   "main": "index.js",
+  "type": "commonjs",
   "scripts": {
     "start": "node index.js"
   },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
-    "discord.js": "^14.14.1",
-    "better-sqlite3": "^11.0.0"
+    "discord.js": "^14.16.3"
   }
 }
