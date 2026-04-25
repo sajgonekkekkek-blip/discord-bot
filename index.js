@@ -42,31 +42,49 @@ const client = new Client({
 
 // ================= COMMANDS =================
 const commands = [
-  new SlashCommandBuilder().setName("ping").setDescription("🏓 Pong"),
+  new SlashCommandBuilder()
+    .setName("ping")
+    .setDescription("sprawdza działanie bota"),
 
-  new SlashCommandBuilder().setName("panel").setDescription("🎫 Ticket panel (admin)"),
+  new SlashCommandBuilder()
+    .setName("panel")
+    .setDescription("panel ticketów"),
 
   new SlashCommandBuilder()
     .setName("userinfo")
-    .setDescription("👤 info usera")
-    .addUserOption(o => o.setName("user").setDescription("user")),
+    .setDescription("informacje o użytkowniku")
+    .addUserOption(o =>
+      o.setName("user")
+        .setDescription("wybierz użytkownika")
+    ),
 
   new SlashCommandBuilder()
     .setName("clear")
-    .setDescription("🧹 usuwa wiadomości")
-    .addIntegerOption(o => o.setName("ilosc").setRequired(true)),
+    .setDescription("usuwa wiadomości")
+    .addIntegerOption(o =>
+      o.setName("ilosc")
+        .setDescription("ilość wiadomości")
+        .setRequired(true)
+    ),
 
   new SlashCommandBuilder()
     .setName("ban")
-    .setDescription("🔨 ban user")
-    .addUserOption(o => o.setName("user").setRequired(true)),
+    .setDescription("banuje użytkownika")
+    .addUserOption(o =>
+      o.setName("user")
+        .setDescription("wybierz użytkownika")
+        .setRequired(true)
+    ),
 
   new SlashCommandBuilder()
     .setName("kick")
-    .setDescription("👢 kick user")
-    .addUserOption(o => o.setName("user").setRequired(true))
+    .setDescription("wyrzuca użytkownika")
+    .addUserOption(o =>
+      o.setName("user")
+        .setDescription("wybierz użytkownika")
+        .setRequired(true)
+    )
 ].map(c => c.toJSON());
-
 // ================= REGISTER =================
 const rest = new REST({ version: "10" }).setToken(TOKEN);
 
