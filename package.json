@@ -1,7 +1,6 @@
 {
   "name": "discord-bot-pro",
-  "version": "6.6.0",
-  "description": "Profesjonalny bot Discord - ticket system + moderacja",
+  "version": "7.0.0",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
