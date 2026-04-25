@@ -15,8 +15,11 @@ const {
   StringSelectMenuBuilder
 } = require("discord.js");
 
+const axios = require("axios");
+
 // ================= CONFIG =================
 const TOKEN = process.env.TOKEN;
+const OPENAI_KEY = process.env.OPENAI_KEY;
 
 const OWNER_ID = "1311750832374419535";
 const MOD_ROLE = "1497541728306204712";
@@ -24,6 +27,15 @@ const OWNER_ROLE = "1497524742868045934";
 
 const CREATE_CHANNEL_ID = "1497611703280734428";
 const VOICE_CATEGORY_ID = "1497524528060956723";
+
+const AI_CHANNEL_ID = "1497629571275559042";
+
+// ================= BAD WORD FILTER =================
+const BAD_WORDS = ["kurwa","chuj","jeb","pierd","fuck","shit"];
+
+function isBad(text) {
+  return BAD_WORDS.some(w => text.toLowerCase().includes(w));
+}
 
 // ================= CLIENT =================
 const client = new Client({
@@ -41,21 +53,39 @@ const voiceOwners = new Map();
 const voiceBans = new Map();
 const voicePanels = new Map();
 
-// ================= PERMS =================
-function isMod(member) {
-  return (
-    member.roles.cache.has(MOD_ROLE) ||
-    member.roles.cache.has(OWNER_ROLE) ||
-    member.id === OWNER_ID
-  );
-}
-
 // ================= READY =================
 client.once("ready", async () => {
   console.log("BOT ONLINE");
+
+  const channel = await client.channels.fetch(AI_CHANNEL_ID);
+
+  if (channel) {
+    const embed = new EmbedBuilder()
+      .setTitle("🤖 AI Assistant")
+      .setColor("#00AEEF")
+      .setDescription(
+`Witaj w systemie AI.
+
+━━━━━━━━━━━━━━━━━━
+
+To miejsce służy do zadawania pytań AI.
+
+Zasady:
+• Nie używaj wulgaryzmów
+• Nie spamuj wiadomości
+• AI odpowiada automatycznie
+• Zachowuj kulturę
+
+━━━━━━━━━━━━━━━━━━
+
+System działa automatycznie i może się mylić.`
+      );
+
+    channel.send({ embeds: [embed] });
+  }
 });
 
-// ================= VOICE CREATE =================
+// ================= VOICE SYSTEM =================
 client.on("voiceStateUpdate", async (oldState, newState) => {
 
   if (newState.channelId === CREATE_CHANNEL_ID) {
@@ -84,30 +114,30 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
     await member.voice.setChannel(voice);
 
     const embed = new EmbedBuilder()
-      .setTitle("🎛️ Panel kanału głosowego")
+      .setTitle("🎛️ Panel kanału")
       .setColor("#5865F2")
       .setDescription(
 `Zarządzanie kanałem:
 
 🔒 Zamknij / Otwórz
 ✏️ Zmień nazwę
-👢 Wyrzuć użytkownika
+👢 Kick
 ⛔ Ban / Unban
 
-Kanał znika po 60 sekundach pustki.`
+Kanał usuwa się po 60 sekundach pustki.`
       );
 
     const row1 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`lock_${voice.id}`).setLabel("Zamknij").setStyle(2),
-      new ButtonBuilder().setCustomId(`unlock_${voice.id}`).setLabel("Otwórz").setStyle(2),
-      new ButtonBuilder().setCustomId(`rename_${voice.id}`).setLabel("Rename").setStyle(1)
+      new ButtonBuilder().setCustomId(`lock_${voice.id}`).setStyle(2).setLabel("Zamknij"),
+      new ButtonBuilder().setCustomId(`unlock_${voice.id}`).setStyle(2).setLabel("Otwórz"),
+      new ButtonBuilder().setCustomId(`rename_${voice.id}`).setStyle(1).setLabel("Rename")
     );
 
     const row2 = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`kick_${voice.id}`).setLabel("Kick").setStyle(2),
-      new ButtonBuilder().setCustomId(`ban_${voice.id}`).setLabel("Ban").setStyle(4),
-      new ButtonBuilder().setCustomId(`unban_${voice.id}`).setLabel("Unban").setStyle(3),
-      new ButtonBuilder().setCustomId(`delete_${voice.id}`).setLabel("Delete").setStyle(4)
+      new ButtonBuilder().setCustomId(`kick_${voice.id}`).setStyle(2).setLabel("Kick"),
+      new ButtonBuilder().setCustomId(`ban_${voice.id}`).setStyle(4).setLabel("Ban"),
+      new ButtonBuilder().setCustomId(`unban_${voice.id}`).setStyle(3).setLabel("Unban"),
+      new ButtonBuilder().setCustomId(`delete_${voice.id}`).setStyle(4).setLabel("Delete")
     );
 
     await panel.send({ embeds: [embed], components: [row1, row2] });
@@ -143,152 +173,60 @@ Kanał znika po 60 sekundach pustki.`
   }
 });
 
-// ================= INTERACTIONS =================
-client.on("interactionCreate", async (i) => {
+// ================= AI SYSTEM =================
+client.on("messageCreate", async (message) => {
 
-  // ================= BUTTONS =================
-  if (i.isButton()) {
+  if (message.author.bot) return;
 
-    const [action, channelId] = i.customId.split("_");
+  // tylko kanał AI
+  if (message.channel.id !== AI_CHANNEL_ID) return;
 
-    const channel = i.guild.channels.cache.get(channelId);
-    if (!channel) return;
+  const text = message.content;
 
-    const owner = voiceOwners.get(channelId);
-    const bans = voiceBans.get(channelId);
-
-    if (bans?.has(i.user.id))
-      return i.reply({ content: "Zbanowany z kanału", ephemeral: true });
-
-    if (i.user.id !== owner && !isMod(i.member))
-      return i.reply({ content: "Brak dostępu", ephemeral: true });
-
-    if (action === "lock") {
-      await channel.permissionOverwrites.edit(i.guild.id, { Connect: false });
-      return i.reply({ content: "Kanał zamknięty", ephemeral: true });
-    }
-
-    if (action === "unlock") {
-      await channel.permissionOverwrites.edit(i.guild.id, { Connect: true });
-      return i.reply({ content: "Kanał otwarty", ephemeral: true });
-    }
-
-    if (action === "rename") {
-
-      const modal = new ModalBuilder()
-        .setCustomId(`rename_${channelId}`)
-        .setTitle("Zmiana nazwy");
-
-      const input = new TextInputBuilder()
-        .setCustomId("name")
-        .setLabel("Nowa nazwa")
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      modal.addComponents(new ActionRowBuilder().addComponents(input));
-
-      return i.showModal(modal);
-    }
-
-    if (action === "kick") {
-
-      const menu = new StringSelectMenuBuilder()
-        .setCustomId(`kick_${channelId}`)
-        .setPlaceholder("Wybierz użytkownika")
-        .addOptions(
-          channel.members.map(m => ({
-            label: m.user.username,
-            value: m.id
-          }))
-        );
-
-      return i.reply({
-        components: [new ActionRowBuilder().addComponents(menu)],
-        ephemeral: true
-      });
-    }
-
-    if (action === "ban") {
-
-      const menu = new StringSelectMenuBuilder()
-        .setCustomId(`ban_${channelId}`)
-        .setPlaceholder("Wybierz użytkownika")
-        .addOptions(
-          channel.members.map(m => ({
-            label: m.user.username,
-            value: m.id
-          }))
-        );
-
-      return i.reply({
-        components: [new ActionRowBuilder().addComponents(menu)],
-        ephemeral: true
-      });
-    }
-
-    if (action === "unban") {
-
-      const list = voiceBans.get(channelId);
-
-      return i.reply({
-        content: `Zbanowani: ${[...list].join(", ") || "brak"}`,
-        ephemeral: true
-      });
-    }
-
-    if (action === "delete") {
-
-      const panelId = voicePanels.get(channelId);
-      const panel = i.guild.channels.cache.get(panelId);
-
-      if (panel) panel.delete().catch(()=>{});
-
-      voiceOwners.delete(channelId);
-      voiceBans.delete(channelId);
-      voicePanels.delete(channelId);
-
-      return channel.delete();
-    }
+  // filtr
+  if (isBad(text)) {
+    await message.delete().catch(()=>{});
+    return;
   }
 
-  // ================= SELECT =================
-  if (i.isStringSelectMenu()) {
-
-    const [type, channelId] = i.customId.split("_");
-    const channel = i.guild.channels.cache.get(channelId);
-
-    if (!channel) return;
-
-    const userId = i.values[0];
-
-    if (type === "kick") {
-      const m = await i.guild.members.fetch(userId);
-      m.voice.disconnect();
-      return i.reply({ content: "Wyrzucono", ephemeral: true });
-    }
-
-    if (type === "ban") {
-      voiceBans.get(channelId).add(userId);
-      const m = await i.guild.members.fetch(userId);
-      m.voice.disconnect();
-      return i.reply({ content: "Zbanowano", ephemeral: true });
-    }
+  // antyspam minimalny
+  if (text.length > 800) {
+    return message.reply("Za długa wiadomość.");
   }
 
-  // ================= MODAL =================
-  if (i.isModalSubmit()) {
+  try {
 
-    if (i.customId.startsWith("rename_")) {
+    const res = await axios.post("https://api.openai.com/v1/chat/completions", {
+      model: "gpt-4o-mini",
+      messages: [
+        {
+          role: "system",
+          content: "Jesteś spokojnym, pomocnym AI. Odpowiadasz krótko i bez emocji."
+        },
+        {
+          role: "user",
+          content: text
+        }
+      ]
+    }, {
+      headers: {
+        Authorization: `Bearer ${OPENAI_KEY}`,
+        "Content-Type": "application/json"
+      }
+    });
 
-      const channelId = i.customId.split("_")[1];
-      const channel = i.guild.channels.cache.get(channelId);
+    const reply = res.data.choices[0].message.content;
 
-      const name = i.fields.getTextInputValue("name");
+    const embed = new EmbedBuilder()
+      .setTitle("🤖 AI")
+      .setColor("#00AEEF")
+      .setDescription(reply.slice(0, 4000));
 
-      await channel.setName(name);
+    message.reply({ embeds: [embed] });
 
-      return i.reply({ content: "Zmieniono nazwę", ephemeral: true });
-    }
+  } catch (e) {
+    console.log(e);
+    message.reply("AI chwilowo nie działa.");
   }
 });
 
