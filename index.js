@@ -14,9 +14,10 @@ const {
 
 const TOKEN = process.env.TOKEN;
 
-// ================= ROLE =================
-const ROLE_OWNER = "1497524742868045934";
-const ROLE_MOD = "1497541728306204712";
+// ================= ROLE / OWNER =================
+const OWNER_ID = "1311750832374419535";
+const MOD_ROLE = "1497541728306204712";
+const OWNER_ROLE = "1497524742868045934";
 
 const client = new Client({
   intents: [
@@ -30,47 +31,25 @@ const client = new Client({
 // ================= STATE =================
 let ticketID = 0;
 const tickets = new Map();
-const closeConfirm = new Map();
-
-// ================= ANTI RAID =================
-const joinLog = new Map();
-const RAID_LIMIT = 5; // ile joinów
-const RAID_TIME = 10000; // 10s
 
 // ================= HELPERS =================
+const isOwner = (i) => i.user.id === OWNER_ID;
 const isMod = (m) =>
-  m.roles.cache.has(ROLE_MOD) || m.roles.cache.has(ROLE_OWNER);
-
-const isOwner = (m) =>
-  m.roles.cache.has(ROLE_OWNER);
+  m.roles.cache.has(MOD_ROLE) || m.roles.cache.has(OWNER_ROLE);
 
 // ================= SLASH COMMANDS =================
 const commands = [
   new SlashCommandBuilder().setName("panel").setDescription("Panel ticketów"),
-
-  new SlashCommandBuilder().setName("userinfo")
-    .setDescription("Info o użytkowniku")
-    .addUserOption(o =>
-      o.setName("user").setDescription("Użytkownik").setRequired(true)
-    ),
-
-  new SlashCommandBuilder().setName("clear")
-    .setDescription("Czyści czat")
-    .addIntegerOption(o =>
-      o.setName("ilosc").setDescription("Ilość").setRequired(true)
-    ),
-
-  new SlashCommandBuilder().setName("say")
-    .setDescription("Bot mówi coś")
-    .addStringOption(o =>
-      o.setName("tekst").setDescription("Treść").setRequired(true)
-    ),
-
-  new SlashCommandBuilder().setName("unban")
-    .setDescription("Odbanuj użytkownika")
-    .addStringOption(o =>
-      o.setName("id").setDescription("ID").setRequired(true)
-    )
+  new SlashCommandBuilder().setName("userinfo").setDescription("Info usera")
+    .addUserOption(o => o.setName("user").setRequired(true)),
+  new SlashCommandBuilder().setName("clear").setDescription("Clear chat")
+    .addIntegerOption(o => o.setName("ilosc").setRequired(true)),
+  new SlashCommandBuilder().setName("say").setDescription("Bot mówi")
+    .addStringOption(o => o.setName("text").setRequired(true)),
+  new SlashCommandBuilder().setName("ban").setDescription("Ban user")
+    .addUserOption(o => o.setName("user").setRequired(true)),
+  new SlashCommandBuilder().setName("unban").setDescription("Unban user")
+    .addStringOption(o => o.setName("id").setRequired(true))
 ].map(c => c.toJSON());
 
 // ================= READY =================
@@ -86,54 +65,21 @@ client.once("ready", async () => {
   console.log("BOT ONLINE");
 });
 
-// ================= ANTI RAID =================
-client.on("guildMemberAdd", async (member) => {
-
-  const now = Date.now();
-  const guild = member.guild;
-
-  if (!joinLog.has(guild.id)) joinLog.set(guild.id, []);
-
-  const logs = joinLog.get(guild.id);
-
-  logs.push(now);
-
-  const recent = logs.filter(t => now - t < RAID_TIME);
-  joinLog.set(guild.id, recent);
-
-  if (recent.length >= RAID_LIMIT) {
-
-    const channel = guild.channels.cache.find(c => c.name === "general");
-
-    guild.channels.cache.forEach(c => {
-      if (c.permissionsFor(guild.id).has(PermissionsBitField.Flags.SendMessages)) {
-        c.permissionOverwrites.edit(guild.id, {
-          SendMessages: false
-        });
-      }
-    });
-
-    if (channel) {
-      channel.send("⚠ RAID DETECTED — serwer zablokowany");
-    }
-  }
-});
-
 // ================= INTERACTIONS =================
 client.on("interactionCreate", async (i) => {
 
   if (!i.isChatInputCommand() && !i.isButton()) return;
 
-  // ================= PANEL =================
+  // ================= PANEL (OWNER ONLY) =================
   if (i.isChatInputCommand() && i.commandName === "panel") {
 
-    if (!isMod(i.member))
-      return i.reply({ content:"Brak dostępu", ephemeral:true });
+    if (!isOwner(i))
+      return i.reply({ ephemeral:true, content:"Brak dostępu" });
 
     const embed = new EmbedBuilder()
       .setTitle("🎫 PANEL TICKETÓW")
       .setColor("#5865F2")
-      .setDescription("Kliknij aby otworzyć ticket");
+      .setDescription("Kliknij aby utworzyć ticket");
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("ticket_help").setLabel("Pomoc").setStyle(ButtonStyle.Success),
@@ -155,18 +101,19 @@ client.on("interactionCreate", async (i) => {
       permissionOverwrites:[
         { id:i.guild.id, deny:["ViewChannel"] },
         { id:i.user.id, allow:["ViewChannel","SendMessages"] },
-        { id:ROLE_MOD, allow:["ViewChannel","SendMessages"] },
-        { id:ROLE_OWNER, allow:["ViewChannel","SendMessages"] }
+        { id:MOD_ROLE, allow:["ViewChannel","SendMessages"] },
+        { id:OWNER_ROLE, allow:["ViewChannel","SendMessages"] }
       ]
     });
 
     tickets.set(ch.id,{
       owner:i.user.id,
-      claimed:false
+      claimed:false,
+      claimedBy:null
     });
 
     const embed = new EmbedBuilder()
-      .setTitle(`🎫 Ticket #${num}`)
+      .setTitle(`🎫 TICKET #${num}`)
       .setColor("#57F287")
       .setDescription("Opisz problem");
 
@@ -176,70 +123,90 @@ client.on("interactionCreate", async (i) => {
       new ButtonBuilder().setCustomId("close").setLabel("Close").setStyle(ButtonStyle.Danger)
     );
 
-    await ch.send({ content:`<@&${ROLE_MOD}>`, embeds:[embed], components:[row] });
+    await ch.send({ content:`<@&${MOD_ROLE}>`, embeds:[embed], components:[row] });
 
-    return i.reply({ content:`Ticket ${num}`, ephemeral:true });
+    return i.reply({ ephemeral:true, content:`Ticket ${num}` });
   }
 
   // ================= CLAIM =================
   if (i.isButton() && i.customId === "claim") {
 
+    const t = tickets.get(i.channel.id);
+    if (!t) return;
+
     if (!isMod(i.member))
       return i.reply({ ephemeral:true, content:"Brak uprawnień" });
 
-    tickets.get(i.channel.id).claimed = true;
+    t.claimed = true;
+    t.claimedBy = i.user.id;
 
-    return i.update({ components: i.message.components });
+    await i.update({ components: i.message.components });
+
+    return i.channel.send({
+      embeds:[
+        new EmbedBuilder()
+          .setTitle("📌 Ticket przejęty")
+          .setColor("#FEE75C")
+          .setDescription(`Przejął: <@${i.user.id}>`)
+      ]
+    });
   }
 
   // ================= UNCLAIM =================
   if (i.isButton() && i.customId === "unclaim") {
 
+    const t = tickets.get(i.channel.id);
+    if (!t) return;
+
     if (!isMod(i.member))
       return i.reply({ ephemeral:true, content:"Brak uprawnień" });
 
-    tickets.get(i.channel.id).claimed = false;
+    t.claimed = false;
+    t.claimedBy = null;
 
-    return i.update({ components: i.message.components });
+    await i.update({ components: i.message.components });
+
+    return i.channel.send({
+      embeds:[
+        new EmbedBuilder()
+          .setTitle("↩ Ticket oddany")
+          .setColor("#FFB02E")
+          .setDescription("Ticket wrócił do administracji")
+      ]
+    });
   }
 
-  // ================= CLOSE (CONFIRM SYSTEM) =================
+  // ================= CLOSE CONFIRM =================
   if (i.isButton() && i.customId === "close") {
 
     const t = tickets.get(i.channel.id);
+    if (!t) return;
 
-    if (isMod(i.member)) {
+    const isAdmin = isMod(i.member);
 
-      closeConfirm.set(i.channel.id, i.user.id);
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("confirm_close").setLabel("Tak").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId("cancel_close").setLabel("Nie").setStyle(ButtonStyle.Secondary)
+    );
 
-      return i.reply({
-        ephemeral:true,
-        content:"Na pewno chcesz zamknąć ticket?",
-        components:[
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId("confirm_close").setLabel("Tak").setStyle(ButtonStyle.Danger),
-            new ButtonBuilder().setCustomId("cancel_close").setLabel("Nie").setStyle(ButtonStyle.Secondary)
-          )
-        ]
-      });
-    }
-
-    return i.reply({ ephemeral:true, content:"Brak uprawnień" });
+    return i.reply({
+      ephemeral:true,
+      content:isAdmin
+        ? "Admin: na pewno zamknąć ticket?"
+        : "Czy na pewno chcesz zamknąć ticket?",
+      components:[row]
+    });
   }
 
   if (i.customId === "confirm_close") {
 
-    const t = tickets.get(i.channel.id);
-
     tickets.delete(i.channel.id);
-    closeConfirm.delete(i.channel.id);
 
-    await i.channel.send("Zamykanie ticketa...");
+    await i.channel.send("Zamykanie...");
     setTimeout(()=>i.channel.delete(),2000);
   }
 
   if (i.customId === "cancel_close") {
-    closeConfirm.delete(i.channel.id);
     return i.update({ content:"Anulowano", components:[] });
   }
 });
@@ -255,49 +222,65 @@ client.on("interactionCreate", async (i) => {
     const u = i.options.getUser("user");
 
     return i.reply({
+      ephemeral:true,
       embeds:[
         new EmbedBuilder()
-          .setTitle("User Info")
+          .setTitle("USER INFO")
           .setColor("#5865F2")
           .setDescription(`User: ${u.tag}\nID: ${u.id}`)
-      ],
-      ephemeral:true
+      ]
     });
   }
 
-  // CLEAR
+  // CLEAR (OWNER ONLY)
   if (i.commandName === "clear") {
 
-    if (!isMod(i.member))
-      return i.reply({ content:"Brak dostępu", ephemeral:true });
+    if (!isOwner(i))
+      return i.reply({ ephemeral:true, content:"Brak dostępu" });
 
     const amount = i.options.getInteger("ilosc");
 
     const msgs = await i.channel.bulkDelete(amount, true);
 
-    return i.reply({ content:`Usunięto ${msgs.size}`, ephemeral:true });
+    return i.reply({ ephemeral:true, content:`Usunięto ${msgs.size}` });
   }
 
-  // SAY
+  // SAY (OWNER ONLY)
   if (i.commandName === "say") {
 
-    const text = i.options.getString("tekst");
+    if (!isOwner(i))
+      return i.reply({ ephemeral:true, content:"Brak dostępu" });
 
-    return i.reply({ content:"Wysłano", ephemeral:true })
-      .then(() => i.channel.send(text));
+    const text = i.options.getString("text");
+
+    await i.reply({ ephemeral:true, content:"Wysłano" });
+    return i.channel.send(text);
   }
 
-  // UNBAN
+  // BAN (MOD ONLY)
+  if (i.commandName === "ban") {
+
+    if (!isMod(i.member))
+      return i.reply({ ephemeral:true, content:"Brak dostępu" });
+
+    const user = i.options.getUser("user");
+
+    await i.guild.members.ban(user.id);
+
+    return i.reply({ ephemeral:true, content:`Zbanowano ${user.tag}` });
+  }
+
+  // UNBAN (MOD ONLY)
   if (i.commandName === "unban") {
 
     if (!isMod(i.member))
-      return i.reply({ content:"Brak dostępu", ephemeral:true });
+      return i.reply({ ephemeral:true, content:"Brak dostępu" });
 
     const id = i.options.getString("id");
 
     await i.guild.members.unban(id);
 
-    return i.reply({ content:`Unban ${id}`, ephemeral:true });
+    return i.reply({ ephemeral:true, content:`Unban ${id}` });
   }
 });
 
