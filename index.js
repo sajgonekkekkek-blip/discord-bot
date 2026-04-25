@@ -20,7 +20,7 @@ const TOKEN = process.env.TOKEN;
 const ROLE_OWNER = "1497524742868045934";
 const ROLE_MOD = "1497541728306204712";
 
-// wezwania
+// wezwania staff
 const W1 = "1497527981822709840";
 const W2 = ["1497527830559588452","1497527748997157015"];
 const W3 = ["1497527663781351495","1497527565617729587","1497527457622790214"];
@@ -42,7 +42,7 @@ const tickets = new Map();
 const cooldown = new Map();
 const pendingClose = new Map();
 
-// ================= HELPERS =================
+// ================= CHECK =================
 const isMod = (m) =>
   m.roles.cache.has(ROLE_MOD) || m.roles.cache.has(ROLE_OWNER);
 
@@ -80,12 +80,12 @@ body{background:#2b2d31;color:white;font-family:Arial;padding:20px}
   html += "</body></html>";
 
   const file = path.join(__dirname, `transcript-${channel.id}.html`);
-  fs.writeFileSync(file, html);
+  fs.writeFileSync(file, file);
 
   return file;
 }
 
-// ================= SLASH COMMANDS =================
+// ================= SLASH =================
 const commands = [
   new SlashCommandBuilder().setName("panel").setDescription("Panel ticketów"),
   new SlashCommandBuilder().setName("ping").setDescription("Ping bota")
@@ -113,12 +113,20 @@ client.on("messageCreate", async (msg) => {
   const t = tickets.get(msg.channel.id);
   if (!t) return;
 
-  if (!isMod(msg.member))
-    return msg.reply("Brak uprawnień");
+  if (!isMod(msg.member)) return;
 
   const cd = cooldown.get(msg.author.id) || 0;
-  if (Date.now() - cd < 15000)
-    return msg.reply("Cooldown");
+
+  if (Date.now() - cd < 10000) {
+    return msg.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("⏳ Cooldown")
+          .setColor("#FEE75C")
+          .setDescription("Odczekaj 10 sekund.")
+      ]
+    }).then(m => setTimeout(()=>m.delete().catch(()=>{}), 5000));
+  }
 
   cooldown.set(msg.author.id, Date.now());
 
@@ -134,9 +142,9 @@ client.on("messageCreate", async (msg) => {
     content: roles.map(r => `<@&${r}>`).join(" "),
     embeds: [
       new EmbedBuilder()
-        .setTitle("Wezwanie administracji")
+        .setTitle("📣 Wezwanie administracji")
         .setColor("#ED4245")
-        .setDescription(`Wzywa: ${msg.author.tag}`)
+        .setDescription(`Użytkownik: ${msg.author.tag}`)
     ]
   });
 });
@@ -162,10 +170,10 @@ SYSTEM TICKETÓW
 Kliknij aby otworzyć ticket.
 
 ━━━━━━━━━━━━━━━━━━━━
-ZASADY:
-• Nie spamuj
-• Jeden problem = jeden ticket
-• Opisz dokładnie sytuację`
+Zasady:
+• brak spamu
+• jeden problem = jeden ticket
+• opisz dokładnie`
       );
 
     const row = new ActionRowBuilder().addComponents(
@@ -176,7 +184,7 @@ ZASADY:
     return i.reply({ embeds:[embed], components:[row] });
   }
 
-  // ================= CREATE TICKET =================
+  // ================= CREATE =================
   if (i.isButton() && (i.customId === "ticket_help" || i.customId === "ticket_report")) {
 
     ticketID++;
@@ -201,39 +209,22 @@ ZASADY:
       claimedBy:null
     });
 
-    const embed = new EmbedBuilder()
-      .setTitle(`TICKET #${num}`)
+    const base = new EmbedBuilder()
+      .setTitle(`🎫 TICKET #${num}`)
       .setColor("#57F287")
+      .setDescription("Opisz problem dokładnie.");
+
+    const report = new EmbedBuilder()
+      .setTitle("📢 ZGŁOSZENIE")
+      .setColor("#ED4245")
       .setDescription(
-`━━━━━━━━━━━━━━━━━━━━
-📌 TICKET SYSTEM
-
-Status: OTWARTY
-Numer: #${num}
-
-━━━━━━━━━━━━━━━━━━━━
-OPIS:
-Opisz problem dokładnie
-
-━━━━━━━━━━━━━━━━━━━━`
-      );
-
-    if (isReport) {
-      await ch.send({
-        content:`<@&${ROLE_MOD}>`,
-        embeds:[
-          new EmbedBuilder()
-            .setTitle("📢 ZGŁOSZENIE")
-            .setColor("#ED4245")
-            .setDescription(
 `Użytkownik: <@${i.user.id}>
 ID: ${i.user.id}
 
-Opisz sytuację i dodaj dowody`
-            )
-        ]
-      });
-    }
+Opisz sytuację`
+      );
+
+    const embedToSend = isReport ? report : base;
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("claim").setLabel("📌 Claim").setStyle(ButtonStyle.Success),
@@ -243,11 +234,11 @@ Opisz sytuację i dodaj dowody`
 
     await ch.send({
       content:`<@&${ROLE_MOD}>`,
-      embeds:[embed],
+      embeds:[embedToSend],
       components:[row]
     });
 
-    return i.reply({ content:`Ticket #${num} utworzony`, ephemeral:true });
+    return i.reply({ content:`Ticket #${num}`, ephemeral:true });
   }
 
   // ================= CLAIM =================
@@ -262,11 +253,6 @@ Opisz sytuację i dodaj dowody`
     t.claimed = true;
     t.claimedBy = i.user.id;
 
-    const embed = new EmbedBuilder()
-      .setTitle("TICKET PRZEJĘTY")
-      .setColor("#FEE75C")
-      .setDescription(`Przejął: <@${i.user.id}>`);
-
     await i.update({
       components:[
         new ActionRowBuilder().addComponents(
@@ -276,7 +262,14 @@ Opisz sytuację i dodaj dowody`
       ]
     });
 
-    return i.channel.send({ embeds:[embed] });
+    return i.channel.send({
+      embeds:[
+        new EmbedBuilder()
+          .setTitle("📌 Ticket przejęty")
+          .setColor("#FEE75C")
+          .setDescription(`Przejął: <@${i.user.id}>`)
+      ]
+    });
   }
 
   // ================= UNCLAIM =================
@@ -300,7 +293,14 @@ Opisz sytuację i dodaj dowody`
       ]
     });
 
-    return i.channel.send("Ticket oddany do puli.");
+    return i.channel.send({
+      embeds:[
+        new EmbedBuilder()
+          .setTitle("↩ Ticket oddany")
+          .setColor("#FFB02E")
+          .setDescription("Wraca do puli administracji")
+      ]
+    });
   }
 
   // ================= CLOSE =================
