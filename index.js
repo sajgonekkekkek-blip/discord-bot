@@ -14,23 +14,30 @@ const {
 
 const Database = require("better-sqlite3");
 
-// ================= CONFIG =================
+// ================= KONFIGURACJA =================
 const TOKEN = process.env.TOKEN;
 
-const OWNER_ROLE = "1497524742868045934";
-const MOD_ROLE = "1497541728306204712";
+const ROLA_WŁAŚCICIEL = "1497524742868045934";
+const ROLA_MODERATOR = "1497541728306204712";
 
-// ================= DATABASE =================
-const db = new Database("data.db");
+// role wezwan
+const ROLE_W1 = "1497527981822709840";
+const ROLE_W2 = ["1497527830559588452","1497527748997157015"];
+const ROLE_W3 = ["1497527663781351495","1497527565617729587","1497527457622790214"];
+const ROLE_W4 = ["1497527300848091288","1497527197886447656"];
+const ROLE_W5 = ["1497528458711138406","1497529283537797130","1497529477150933023"];
+
+// ================= BAZA DANYCH =================
+const db = new Database("dane.db");
 
 db.prepare(`
-CREATE TABLE IF NOT EXISTS xp (
-  user TEXT PRIMARY KEY,
+CREATE TABLE IF NOT EXISTS poziomy (
+  uzytkownik TEXT PRIMARY KEY,
   xp INTEGER,
-  lvl INTEGER
+  poziom INTEGER
 )`).run();
 
-// ================= CLIENT =================
+// ================= KLIENT =================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -40,52 +47,20 @@ const client = new Client({
   ]
 });
 
-// ================= COMMANDS =================
+// ================= DANE POMOCNICZE =================
+const ticketStatus = new Map();
+const cooldownWezwan = new Map();
+
+// ================= KOMENDY =================
 const commands = [
-  new SlashCommandBuilder()
-    .setName("ping")
-    .setDescription("sprawdza działanie bota"),
+  new SlashCommandBuilder().setName("ping").setDescription("Sprawdza działanie bota"),
 
-  new SlashCommandBuilder()
-    .setName("panel")
-    .setDescription("panel ticketów"),
+  new SlashCommandBuilder().setName("panel").setDescription("Panel ticketów (dla administracji)"),
 
-  new SlashCommandBuilder()
-    .setName("userinfo")
-    .setDescription("informacje o użytkowniku")
-    .addUserOption(o =>
-      o.setName("user")
-        .setDescription("wybierz użytkownika")
-    ),
-
-  new SlashCommandBuilder()
-    .setName("clear")
-    .setDescription("usuwa wiadomości")
-    .addIntegerOption(o =>
-      o.setName("ilosc")
-        .setDescription("ilość wiadomości")
-        .setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName("ban")
-    .setDescription("banuje użytkownika")
-    .addUserOption(o =>
-      o.setName("user")
-        .setDescription("wybierz użytkownika")
-        .setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName("kick")
-    .setDescription("wyrzuca użytkownika")
-    .addUserOption(o =>
-      o.setName("user")
-        .setDescription("wybierz użytkownika")
-        .setRequired(true)
-    )
+  new SlashCommandBuilder().setName("userinfo").setDescription("Informacje o użytkowniku")
 ].map(c => c.toJSON());
-// ================= REGISTER =================
+
+// ================= REJESTRACJA =================
 const rest = new REST({ version: "10" }).setToken(TOKEN);
 
 client.once("ready", async () => {
@@ -96,79 +71,157 @@ client.once("ready", async () => {
     { body: commands }
   );
 
-  console.log("BOT READY");
+  console.log("Bot działa poprawnie");
 });
 
-// ================= PERMS =================
-function hasPerm(member) {
+// ================= PERMISJE =================
+function czyMaDostep(member) {
   return (
-    member.roles.cache.has(OWNER_ROLE) ||
-    member.roles.cache.has(MOD_ROLE)
+    member.roles.cache.has(ROLA_WŁAŚCICIEL) ||
+    member.roles.cache.has(ROLA_MODERATOR)
   );
 }
 
-// ================= LOG CHANNEL =================
-function log(guild, msg) {
-  const ch = guild.channels.cache.find(c => c.name === "logs");
-  if (ch) ch.send(`📋 ${msg}`);
-}
+// ================= XP SYSTEM =================
+function dodajXP(id) {
+  let dane = db.prepare("SELECT * FROM poziomy WHERE uzytkownik=?").get(id);
 
-// ================= LEVEL SYSTEM =================
-function addXP(userId) {
-  let data = db.prepare("SELECT * FROM xp WHERE user=?").get(userId);
-
-  if (!data) {
-    db.prepare("INSERT INTO xp VALUES (?,?,?)").run(userId, 0, 0);
-    data = { xp: 0, lvl: 0 };
+  if (!dane) {
+    db.prepare("INSERT INTO poziomy VALUES (?,?,?)").run(id, 0, 0);
+    dane = { xp: 0, poziom: 0 };
   }
 
-  data.xp += 5;
+  dane.xp += 5;
 
-  if (data.xp >= 100) {
-    data.lvl++;
-    data.xp = 0;
+  if (dane.xp >= 100) {
+    dane.poziom++;
+    dane.xp = 0;
   }
 
-  db.prepare("UPDATE xp SET xp=?, lvl=? WHERE user=?")
-    .run(data.xp, data.lvl, userId);
+  db.prepare("UPDATE poziomy SET xp=?, poziom=? WHERE uzytkownik=?")
+    .run(dane.xp, dane.poziom, id);
 
-  return data;
+  return dane;
 }
 
-// ================= MESSAGE SYSTEM =================
-client.on("messageCreate", (msg) => {
+// ================= WIADOMOŚCI =================
+client.on("messageCreate", async (msg) => {
   if (msg.author.bot) return;
 
-  const data = addXP(msg.author.id);
+  const dane = dodajXP(msg.author.id);
 
-  // automod link
+  // linki
   if (msg.content.includes("http")) {
     if (!msg.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-      msg.delete().catch(() => {});
-      msg.channel.send("🚫 linki zablokowane");
+      await msg.delete().catch(() => {});
+      msg.channel.send("🚫 Linki są zablokowane");
     }
   }
 
   // caps
   if (msg.content.length > 6 && msg.content === msg.content.toUpperCase()) {
     if (!msg.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-      msg.channel.send("⚠️ nie krzycz");
+      msg.channel.send("⚠️ Nie krzycz");
     }
   }
 
-  if (data.xp === 0 && data.lvl > 0) {
-    msg.channel.send(`📊 lvl up → ${data.lvl}`);
+  if (dane.xp === 0 && dane.poziom > 0) {
+    msg.channel.send(`📊 Awans! Twój poziom: ${dane.poziom}`);
+  }
+
+  // ================= WEZWANIA STAFF =================
+  if (msg.content.startsWith("!w")) {
+
+    const status = ticketStatus.get(msg.channel.id);
+
+    if (!status || status.claimed) {
+      return msg.reply("❌ Najpierw musisz odblokować ticket (unclaim)");
+    }
+
+    const cooldown = cooldownWezwan.get(msg.author.id) || 0;
+    if (Date.now() - cooldown < 15000) {
+      return msg.reply("⏳ Poczekaj 15 sekund przed kolejnym wezwaniem");
+    }
+
+    cooldownWezwan.set(msg.author.id, Date.now());
+
+    let rolePing = [];
+
+    if (msg.content === "!w1") rolePing = [ROLE_W1];
+    if (msg.content === "!w2") rolePing = ROLE_W2;
+    if (msg.content === "!w3") rolePing = ROLE_W3;
+    if (msg.content === "!w4") rolePing = ROLE_W4;
+    if (msg.content === "!w5") rolePing = ROLE_W5;
+
+    msg.channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("🚨 WEZWANIE OBSŁUGI")
+          .setDescription(
+            `Użytkownik ${msg.author} wezwał pomoc!\n\n` +
+            `Poziom wezwania: ${msg.content}\n` +
+            `Proszę o reakcję administracji`
+          )
+          .setColor("#ED4245")
+      ],
+      content: rolePing.map(r => `<@&${r}>`).join(" ")
+    });
   }
 });
 
-// ================= INTERACTIONS =================
+// ================= INTERAKCJE =================
 client.on("interactionCreate", async (i) => {
 
-  // ================= SLASH =================
   if (i.isChatInputCommand()) {
 
     if (i.commandName === "ping")
-      return i.reply("🏓 pong");
+      return i.reply("🏓 Bot działa poprawnie");
+
+    // ================= PANEL =================
+    if (i.commandName === "panel") {
+
+      if (!czyMaDostep(i.member))
+        return i.reply({ content: "❌ Brak uprawnień", ephemeral: true });
+
+      const embed = new EmbedBuilder()
+        .setTitle("🎫 SYSTEM TICKETÓW")
+        .setDescription(
+`System ticketów:
+
+Umożliwia kontakt z administracją serwera.
+
+━━━━━━━━━━━━━━━━━━━━
+
+Tworzenie:
+Kliknij przycisk aby otworzyć ticket.
+
+━━━━━━━━━━━━━━━━━━━━
+
+Korzystanie:
+Opisz swój problem dokładnie.
+
+━━━━━━━━━━━━━━━━━━━━
+
+Zamykanie:
+Ticket zamyka administracja.
+
+━━━━━━━━━━━━━━━━━━━━
+
+Zasady:
+• brak spamu
+• jeden problem = jeden ticket`
+        )
+        .setColor("#5865F2");
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId("ticket")
+          .setLabel("Otwórz ticket")
+          .setStyle(ButtonStyle.Success)
+      );
+
+      return i.reply({ embeds: [embed], components: [row] });
+    }
 
     // ================= USERINFO =================
     if (i.commandName === "userinfo") {
@@ -179,14 +232,13 @@ client.on("interactionCreate", async (i) => {
       return i.reply({
         embeds: [
           new EmbedBuilder()
-            .setTitle("👤 USER INFO")
+            .setTitle("👤 Informacje o użytkowniku")
             .setColor("#5865F2")
             .setThumbnail(user.displayAvatarURL())
-
             .setDescription(
 `Nick: ${user.tag}
 ID: ${user.id}
-Konto: ${user.createdAt.toDateString()}
+Konto utworzone: ${user.createdAt.toDateString()}
 Dołączył: ${member.joinedAt?.toDateString()}
 
 Role: ${member.roles.cache.map(r => r.name).slice(0, 10).join(", ")}`
@@ -194,199 +246,85 @@ Role: ${member.roles.cache.map(r => r.name).slice(0, 10).join(", ")}`
         ]
       });
     }
-
-    // ================= PANEL =================
-    if (i.commandName === "panel") {
-
-      if (!hasPerm(i.member))
-        return i.reply({ content: "❌ brak permisji", ephemeral: true });
-
-      const embed = new EmbedBuilder()
-        .setTitle("🎫 Ticket System")
-        .setDescription(
-`System Ticketów:
-System pozwala kontaktować się z administracją.
-
-━━━━━━━━━━━━━━━━━━━━
-
-Tworzenie ticketu:
-Kliknij przycisk, aby stworzyć prywatny kanał.
-
-━━━━━━━━━━━━━━━━━━━━
-
-Korzystanie:
-Opisz problem dokładnie.
-
-━━━━━━━━━━━━━━━━━━━━
-
-Zamykanie:
-Ticket zamyka staff.
-
-━━━━━━━━━━━━━━━━━━━━
-
-Zasady:
-• brak spamu
-• brak multi ticketów
-• kultura`
-        )
-        .setColor("#2b2d31");
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId("ticket_support")
-          .setLabel("💬 Support")
-          .setStyle(ButtonStyle.Primary),
-
-        new ButtonBuilder()
-          .setCustomId("ticket_report")
-          .setLabel("🚨 Report")
-          .setStyle(ButtonStyle.Danger)
-      );
-
-      return i.reply({ embeds: [embed], components: [row] });
-    }
-
-    // ================= CLEAR =================
-    if (i.commandName === "clear") {
-
-      if (!hasPerm(i.member))
-        return i.reply({ content: "❌ brak permisji", ephemeral: true });
-
-      const amount = i.options.getInteger("ilosc");
-
-      await i.channel.bulkDelete(amount);
-
-      return i.reply({
-        content: `🧹 usunięto ${amount}`,
-        ephemeral: true
-      });
-    }
-
-    // ================= BAN =================
-    if (i.commandName === "ban") {
-
-      if (!hasPerm(i.member))
-        return i.reply({ content: "❌ brak permisji", ephemeral: true });
-
-      const user = i.options.getUser("user");
-      const m = await i.guild.members.fetch(user.id);
-
-      await m.ban();
-
-      log(i.guild, `BAN: ${user.tag}`);
-
-      return i.reply(`🔨 zbanowano ${user.tag}`);
-    }
-
-    // ================= KICK =================
-    if (i.commandName === "kick") {
-
-      if (!hasPerm(i.member))
-        return i.reply({ content: "❌ brak permisji", ephemeral: true });
-
-      const user = i.options.getUser("user");
-      const m = await i.guild.members.fetch(user.id);
-
-      await m.kick();
-
-      log(i.guild, `KICK: ${user.tag}`);
-
-      return i.reply(`👢 wyrzucono ${user.tag}`);
-    }
   }
 
-  // ================= BUTTONS =================
+  // ================= PRZYCISKI =================
   if (i.isButton()) {
 
     const guild = i.guild;
 
-    let cat = guild.channels.cache.find(c => c.name === "🎫・TICKETS");
+    if (i.customId === "ticket") {
 
-    if (!cat) {
-      cat = await guild.channels.create({
-        name: "🎫・TICKETS",
-        type: ChannelType.GuildCategory
-      });
-    }
+      const kategoria = guild.channels.cache.find(c => c.name === "TICKETY")
+        || await guild.channels.create({ name: "TICKETY", type: ChannelType.GuildCategory });
 
-    // ================= CREATE TICKET =================
-    if (i.customId.startsWith("ticket_")) {
-
-      const ch = await guild.channels.create({
+      const kanal = await guild.channels.create({
         name: `ticket-${i.user.username}`,
         type: ChannelType.GuildText,
-        parent: cat.id,
+        parent: kategoria.id,
         permissionOverwrites: [
           { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
           { id: i.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
-          { id: MOD_ROLE, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+          { id: ROLA_MODERATOR, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
         ]
       });
 
-      const embed = new EmbedBuilder()
-        .setTitle("🎫 TICKET OTWARTY")
-        .setDescription(
-`Status: OPEN
+      ticketStatus.set(kanal.id, { claimed: false });
 
-Opisz problem dokładnie.
-Staff został powiadomiony.`
-        )
-        .setColor("Green");
+      const embed = new EmbedBuilder()
+        .setTitle("🎫 Ticket otwarty")
+        .setDescription("Opisz swój problem. Administracja została powiadomiona.")
+        .setColor("#57F287");
 
       const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId("claim")
-          .setLabel("🔓 Claim")
-          .setStyle(ButtonStyle.Success),
-
-        new ButtonBuilder()
-          .setCustomId("close")
-          .setLabel("❌ Close")
-          .setStyle(ButtonStyle.Danger)
+        new ButtonBuilder().setCustomId("claim").setLabel("Przejmij").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("unclaim").setLabel("Oddaj").setStyle(ButtonStyle.Secondary),
+        new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
       );
 
-      ch.send({
-        content: `<@&${MOD_ROLE}> <@${i.user.id}>`,
-        embeds: [embed],
-        components: [row]
-      });
+      kanal.send({ content: `<@&${ROLA_MODERATOR}> <@${i.user.id}>`, embeds: [embed], components: [row] });
 
-      return i.reply({ content: "🎫 stworzono ticket", ephemeral: true });
+      return i.reply({ content: "Ticket utworzony", ephemeral: true });
     }
 
-    // ================= CLAIM =================
+    // CLAIM
     if (i.customId === "claim") {
+      ticketStatus.set(i.channel.id, { claimed: true });
 
-      await i.update({
+      return i.update({
         components: [
           new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setCustomId("claimed")
-              .setLabel("🔒 CLAIMED")
-              .setStyle(ButtonStyle.Secondary)
-              .setDisabled(true),
-
-            new ButtonBuilder()
-              .setCustomId("close")
-              .setLabel("❌ Close")
-              .setStyle(ButtonStyle.Danger)
+            new ButtonBuilder().setCustomId("unclaim").setLabel("Oddaj").setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
           )
         ]
       });
-
-      return i.channel.send(`🔒 przejęty przez ${i.user}`);
     }
 
-    // ================= CLOSE =================
-    if (i.customId === "close") {
+    // UNCLAIM
+    if (i.customId === "unclaim") {
+      ticketStatus.set(i.channel.id, { claimed: false });
 
-      await i.channel.send("❌ zamykam ticket...");
-      log(i.guild, `Ticket closed: ${i.channel.name}`);
+      return i.update({
+        components: [
+          new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId("claim").setLabel("Przejmij").setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
+          )
+        ]
+      });
+    }
+
+    // CLOSE
+    if (i.customId === "close") {
+      ticketStatus.delete(i.channel.id);
+
+      await i.channel.send("Ticket zamykany...");
 
       setTimeout(() => i.channel.delete(), 4000);
     }
   }
 });
 
-// ================= LOGIN =================
+// ================= START =================
 client.login(TOKEN);
