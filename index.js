@@ -11,6 +11,9 @@ const {
   ChannelType
 } = require("discord.js");
 
+const fs = require("fs");
+const path = require("path");
+
 const TOKEN = process.env.TOKEN;
 
 // ================= ROLE =================
@@ -33,6 +36,7 @@ const client = new Client({
   ]
 });
 
+// ================= STATE =================
 let ticketID = 0;
 const tickets = new Map();
 const cooldown = new Map();
@@ -45,9 +49,51 @@ const isMod = (m) =>
 const isOwner = (m) =>
   m.roles.cache.has(ROLE_OWNER);
 
+// ================= TRANSCRIPT =================
+async function generateTranscript(channel) {
+
+  const msgs = await channel.messages.fetch({ limit: 100 });
+  const sorted = [...msgs.values()].sort((a,b)=>a.createdTimestamp-b.createdTimestamp);
+
+  let html = `
+  <html>
+  <head>
+  <meta charset="utf-8">
+  <title>Transcript</title>
+  <style>
+    body{background:#2b2d31;color:white;font-family:Arial;padding:20px}
+    .msg{background:#313338;margin:10px 0;padding:10px;border-radius:8px}
+    .a{color:#5865F2;font-weight:bold}
+    .t{font-size:11px;color:#aaa}
+  </style>
+  </head>
+  <body>
+  <h2>Transcript: ${channel.name}</h2>
+  `;
+
+  for (const m of sorted) {
+    html += `
+      <div class="msg">
+        <div class="a">${m.author.tag}</div>
+        <div class="t">${new Date(m.createdTimestamp).toLocaleString()}</div>
+        <div>${m.content || "[embed]"}</div>
+      </div>
+    `;
+  }
+
+  html += "</body></html>";
+
+  const file = path.join(__dirname, `transcript-${channel.id}.html`);
+  fs.writeFileSync(file, html);
+
+  return file;
+}
+
 // ================= COMMANDS =================
 const commands = [
-  new SlashCommandBuilder().setName("ping").setDescription("Sprawdź bota"),
+  new SlashCommandBuilder().setName("ping").setDescription("Ping bota"),
+
+  new SlashCommandBuilder().setName("panel").setDescription("Panel ticketów"),
 
   new SlashCommandBuilder()
     .setName("userinfo")
@@ -60,18 +106,18 @@ const commands = [
     .setName("clear")
     .setDescription("Usuń wiadomości")
     .addIntegerOption(o =>
-      o.setName("ilosc").setDescription("Ilość").setRequired(true)
+      o.setName("ilosc").setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("unban")
-    .setDescription("Unban użytkownika")
+    .setDescription("Unban")
     .addStringOption(o =>
-      o.setName("id").setDescription("ID").setRequired(true)
+      o.setName("id").setRequired(true)
     ),
 
-  new SlashCommandBuilder().setName("unbanall").setDescription("Unban wszystkich (MOD+)"),
-  new SlashCommandBuilder().setName("banall").setDescription("Ban all (OWNER)")
+  new SlashCommandBuilder().setName("unbanall").setDescription("Unban all"),
+  new SlashCommandBuilder().setName("banall").setDescription("Ban all")
 ].map(c => c.toJSON());
 
 // ================= READY =================
@@ -99,11 +145,11 @@ client.on("messageCreate", async (msg) => {
       return msg.reply("Brak uprawnień");
 
     if (t.claimed)
-      return msg.reply("Ticket jest przejęty");
+      return msg.reply("Ticket przejęty");
 
     const cd = cooldown.get(msg.author.id) || 0;
     if (Date.now() - cd < 15000)
-      return msg.reply("Cooldown 15s");
+      return msg.reply("Cooldown");
 
     cooldown.set(msg.author.id, Date.now());
 
@@ -120,7 +166,7 @@ client.on("messageCreate", async (msg) => {
         new EmbedBuilder()
           .setTitle("Wezwanie administracji")
           .setColor("#ED4245")
-          .setDescription(`${msg.author.tag} potrzebuje pomocy`)
+          .setDescription(`${msg.author.tag}`)
       ]
     });
   }
@@ -129,10 +175,41 @@ client.on("messageCreate", async (msg) => {
 // ================= INTERACTIONS =================
 client.on("interactionCreate", async (i) => {
 
+  // ================= SLASH =================
   if (i.isChatInputCommand()) {
 
     if (i.commandName === "ping")
-      return i.reply({ content: "OK", ephemeral: true });
+      return i.reply({ content:"OK", ephemeral:true });
+
+    if (i.commandName === "panel") {
+
+      if (!isMod(i.member))
+        return i.reply({ content:"Brak dostępu", ephemeral:true });
+
+      const embed = new EmbedBuilder()
+        .setTitle("🎫 PANEL TICKETÓW")
+        .setColor("#5865F2")
+        .setDescription(
+`System ticketów:
+
+Tworzenie:
+Kliknij przycisk poniżej
+
+━━━━━━━━━━━━━━
+
+Zasady:
+• brak spamu
+• jeden problem = jeden ticket
+• szanuj administrację`
+        );
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId("ticket_help").setLabel("Pomoc").setStyle(ButtonStyle.Success),
+        new ButtonBuilder().setCustomId("ticket_report").setLabel("Zgłoszenie").setStyle(ButtonStyle.Danger)
+      );
+
+      return i.reply({ embeds:[embed], components:[row], ephemeral:false });
+    }
 
     if (i.commandName === "userinfo") {
 
@@ -140,10 +217,10 @@ client.on("interactionCreate", async (i) => {
       const m = await i.guild.members.fetch(u.id);
 
       return i.reply({
-        ephemeral: true,
-        embeds: [
+        ephemeral:true,
+        embeds:[
           new EmbedBuilder()
-            .setTitle("INFO UŻYTKOWNIKA")
+            .setTitle("INFO USERA")
             .setColor("#5865F2")
             .setDescription(
 `Nick: ${u.tag}
@@ -158,51 +235,48 @@ Dołączył: ${m.joinedAt?.toDateString()}`
     if (i.commandName === "clear") {
 
       if (!isMod(i.member))
-        return i.reply({ content: "Brak dostępu", ephemeral: true });
+        return i.reply({ content:"Brak dostępu", ephemeral:true });
 
       const amount = i.options.getInteger("ilosc");
       const msgs = await i.channel.bulkDelete(amount, true);
 
-      return i.reply({ content: `Usunięto ${msgs.size}`, ephemeral: true });
+      return i.reply({ content:`Usunięto ${msgs.size}`, ephemeral:true });
     }
 
     if (i.commandName === "unban") {
 
       if (!isMod(i.member))
-        return i.reply({ content: "Brak dostępu", ephemeral: true });
+        return i.reply({ content:"Brak dostępu", ephemeral:true });
 
       const id = i.options.getString("id");
       await i.guild.members.unban(id).catch(()=>{});
 
-      return i.reply({ content: `Odbanowano ${id}`, ephemeral: true });
+      return i.reply({ content:"Unban wykonany", ephemeral:true });
     }
 
     if (i.commandName === "unbanall") {
 
       if (!isMod(i.member))
-        return i.reply({ content: "Brak dostępu", ephemeral: true });
+        return i.reply({ content:"Brak dostępu", ephemeral:true });
 
       const bans = await i.guild.bans.fetch();
-
-      for (const b of bans.values()) {
+      for (const b of bans.values())
         await i.guild.members.unban(b.user.id).catch(()=>{});
-      }
 
-      return i.reply({ content: "Odbanowano wszystkich", ephemeral: true });
+      return i.reply({ content:"Unban all", ephemeral:true });
     }
 
     if (i.commandName === "banall") {
 
       if (!isOwner(i.member))
-        return i.reply({ content: "Brak dostępu", ephemeral: true });
+        return i.reply({ content:"Brak dostępu", ephemeral:true });
 
       const members = await i.guild.members.fetch();
-
       members.forEach(m => {
         if (!m.user.bot) m.ban().catch(()=>{});
       });
 
-      return i.reply({ content: "Ban all wykonany", ephemeral: true });
+      return i.reply({ content:"Ban all", ephemeral:true });
     }
   }
 
@@ -212,32 +286,32 @@ Dołączył: ${m.joinedAt?.toDateString()}`
   const t = tickets.get(i.channel.id);
 
   // ================= CREATE TICKET =================
-  if (i.customId.startsWith("ticket")) {
+  if (i.customId === "ticket_help" || i.customId === "ticket_report") {
 
     ticketID++;
     const num = ticketID.toString().padStart(4,"0");
 
     const ch = await i.guild.channels.create({
-      name: `ticket-${num}`,
-      type: ChannelType.GuildText,
-      permissionOverwrites: [
-        { id: i.guild.id, deny: ["ViewChannel"] },
-        { id: i.user.id, allow: ["ViewChannel","SendMessages"] },
-        { id: ROLE_MOD, allow: ["ViewChannel","SendMessages"] },
-        { id: ROLE_OWNER, allow: ["ViewChannel","SendMessages"] }
+      name:`ticket-${num}`,
+      type:ChannelType.GuildText,
+      permissionOverwrites:[
+        { id:i.guild.id, deny:["ViewChannel"] },
+        { id:i.user.id, allow:["ViewChannel","SendMessages"] },
+        { id:ROLE_MOD, allow:["ViewChannel","SendMessages"] },
+        { id:ROLE_OWNER, allow:["ViewChannel","SendMessages"] }
       ]
     });
 
-    tickets.set(ch.id, {
-      owner: i.user.id,
-      claimed: false,
+    tickets.set(ch.id,{
+      owner:i.user.id,
+      claimed:false,
       num
     });
 
     const embed = new EmbedBuilder()
       .setTitle(`TICKET #${num}`)
       .setColor("#57F287")
-      .setDescription("Opisz problem dokładnie");
+      .setDescription("Opisz problem");
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("claim").setLabel("Przejmij").setStyle(ButtonStyle.Success),
@@ -246,9 +320,9 @@ Dołączył: ${m.joinedAt?.toDateString()}`
     );
 
     ch.send({
-      content: `<@&${ROLE_MOD}> <@&${ROLE_OWNER}> <@${i.user.id}>`,
-      embeds: [embed],
-      components: [row]
+      content:`<@&${ROLE_MOD}> <@&${ROLE_OWNER}> <@${i.user.id}>`,
+      embeds:[embed],
+      components:[row]
     });
 
     return i.reply({ content:`Ticket #${num}`, ephemeral:true });
@@ -258,12 +332,12 @@ Dołączył: ${m.joinedAt?.toDateString()}`
   if (i.customId === "claim") {
 
     if (!isMod(i.member))
-      return i.reply({ content:"Brak dostępu", ephemeral:true });
+      return i.reply({ ephemeral:true, content:"Brak dostępu" });
 
     t.claimed = true;
 
     return i.update({
-      components: [
+      components:[
         new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId("unclaim").setLabel("Oddaj").setStyle(ButtonStyle.Secondary),
           new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
@@ -276,12 +350,12 @@ Dołączył: ${m.joinedAt?.toDateString()}`
   if (i.customId === "unclaim") {
 
     if (!isMod(i.member))
-      return i.reply({ content:"Brak dostępu", ephemeral:true });
+      return i.reply({ ephemeral:true, content:"Brak dostępu" });
 
     t.claimed = false;
 
     return i.update({
-      components: [
+      components:[
         new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId("claim").setLabel("Przejmij").setStyle(ButtonStyle.Success),
           new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
@@ -290,24 +364,35 @@ Dołączył: ${m.joinedAt?.toDateString()}`
     });
   }
 
-  // ================= CLOSE (USER + MOD CONFIRM) =================
+  // ================= CLOSE (2 STEP USER + MOD) =================
   if (i.customId === "close") {
 
     if (isMod(i.member)) {
 
       if (!t.claimed)
-        return i.reply({ content:"Najpierw przejmij ticket", ephemeral:true });
+        return i.reply({ ephemeral:true, content:"Najpierw przejmij" });
+
+      const file = await generateTranscript(i.channel);
+
+      const owner = await client.users.fetch(t.owner).catch(()=>null);
+      if (owner) {
+        owner.send({
+          content:"Twój transcript:",
+          files:[file]
+        }).catch(()=>{});
+      }
 
       tickets.delete(i.channel.id);
+
       await i.channel.send("Zamykam...");
       return setTimeout(()=>i.channel.delete(),2000);
     }
 
-    pendingClose.set(i.channel.id, i.user.id);
+    pendingClose.set(i.channel.id,i.user.id);
 
     return i.reply({
       ephemeral:true,
-      content:"Na pewno chcesz zamknąć ticket?",
+      content:"Na pewno?",
       components:[
         new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId("close_yes").setLabel("Tak").setStyle(ButtonStyle.Danger),
@@ -321,6 +406,18 @@ Dołączył: ${m.joinedAt?.toDateString()}`
 
     if (pendingClose.get(i.channel.id) !== i.user.id)
       return;
+
+    const file = await generateTranscript(i.channel);
+
+    const t = tickets.get(i.channel.id);
+
+    const owner = await client.users.fetch(t.owner).catch(()=>null);
+    if (owner) {
+      owner.send({
+        content:"Twój transcript:",
+        files:[file]
+      }).catch(()=>{});
+    }
 
     tickets.delete(i.channel.id);
     pendingClose.delete(i.channel.id);
