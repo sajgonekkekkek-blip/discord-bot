@@ -3,29 +3,15 @@ const {
   GatewayIntentBits,
   EmbedBuilder,
   ChannelType,
+  PermissionsBitField,
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
-  ModalBuilder,
-  TextInputBuilder,
-  TextInputStyle
+  SlashCommandBuilder,
+  REST,
+  Routes
 } = require("discord.js");
 
-const axios = require("axios");
-
-// ================= CONFIG =================
-const TOKEN = process.env.TOKEN;
-const OPENAI_KEY = process.env.OPENAI_KEY;
-
-const AI_CHANNEL_ID = "1497629571275559042";
-const CREATE_CHANNEL_ID = "1497611703280734428";
-const VOICE_CATEGORY_ID = "1497524528060956723";
-
-const MOD_ROLE = "1497541728306204712";
-const OWNER_ROLE = "1497524742868045934";
-const OWNER_ID = "1311750832374419535";
-
-// ================= CLIENT =================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -36,186 +22,265 @@ const client = new Client({
   ]
 });
 
-// ================= STATE =================
+// ================= CONFIG =================
+const TOKEN = process.env.TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
+const GUILD_ID = process.env.GUILD_ID;
+
+const OWNER_ID = "1311750832374419535";
+const MOD_ROLE = "1497541728306204712";
+
+// wezwania ról
+const W_ROLES = {
+  w1: ["1497527981822709840"],
+  w2: ["1497527830559588452", "1497527748997157015"],
+  w3: ["1497527663781351495", "1497527565617729587", "1497527457622790214"],
+  w4: ["1497527300848091288", "1497527197886447656"],
+  w5: ["1497528458711138406", "1497529283537797130", "1497529477150933023"]
+};
+
+// voice system
 const voiceOwners = new Map();
 const voiceBans = new Map();
 
+// tickets
+let ticketCounter = 0;
+const tickets = new Map();
+
 // ================= READY =================
-client.once("ready", async () => {
+client.once("ready", () => {
   console.log("BOT ONLINE");
 });
 
-// ================= AI (NAPRAWIONE) =================
+// ================= MOD CHECK =================
+function isMod(member) {
+  return member.roles.cache.has(MOD_ROLE) || member.id === OWNER_ID;
+}
+
+// ================= W COMMANDS =================
 client.on("messageCreate", async (message) => {
-
   if (message.author.bot) return;
-  if (message.channel.id !== AI_CHANNEL_ID) return;
 
-  if (!OPENAI_KEY) {
-    return message.reply("❌ Brak OPENAI_KEY w konfiguracji bota.");
+  // wezwania
+  if (W_ROLES[message.content]) {
+    if (!isMod(message.member)) return;
+
+    const roles = W_ROLES[message.content];
+
+    return message.channel.send({
+      content: `🚨 Wezwanie: ${roles.map(r => `<@&${r}>`).join(", ")}`
+    });
   }
 
-  try {
-
-    await message.channel.sendTyping();
-
-    const res = await axios.post(
-      "https://api.openai.com/v1/chat/completions",
-      {
-        model: "gpt-4o-mini",
-        messages: [
-          {
-            role: "system",
-            content: "Jesteś pomocnym asystentem Discord. Odpowiadasz po polsku."
-          },
-          {
-            role: "user",
-            content: message.content
-          }
-        ]
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${OPENAI_KEY}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
-
-    const reply = res.data?.choices?.[0]?.message?.content;
-
-    if (!reply) {
-      return message.reply("❌ AI nie zwróciło odpowiedzi.");
-    }
-
-    return message.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle("🤖 AI Assistant")
-          .setColor("#0099ff")
-          .setDescription(reply.slice(0, 4000))
-      ]
-    });
-
-  } catch (e) {
-
-    const err =
-      e?.response?.data?.error?.message ||
-      e?.response?.data ||
-      e?.message;
-
-    console.log("OPENAI ERROR:", err);
-
-    return message.reply("❌ AI chwilowo nie działa: `" + err + "`");
-  }
-});
-
-// ================= VOICE SYSTEM =================
-client.on("voiceStateUpdate", async (oldState, newState) => {
-
-  if (newState.channelId === CREATE_CHANNEL_ID) {
-
-    const member = newState.member;
-
-    const voice = await newState.guild.channels.create({
-      name: `kanal-${member.user.username}`,
-      type: ChannelType.GuildVoice,
-      parent: VOICE_CATEGORY_ID
-    });
-
-    const panel = await newState.guild.channels.create({
-      name: `panel-${member.user.username}`,
-      type: ChannelType.GuildText,
-      parent: VOICE_CATEGORY_ID,
-      permissionOverwrites: [
-        { id: newState.guild.id, deny: ["ViewChannel"] },
-        { id: member.id, allow: ["ViewChannel", "SendMessages"] }
-      ]
-    });
-
-    voiceOwners.set(voice.id, member.id);
-    voiceBans.set(voice.id, new Set());
-
-    await member.voice.setChannel(voice);
+  // panel ticket
+  if (message.content === "panel") {
+    if (message.author.id !== OWNER_ID) return;
 
     const embed = new EmbedBuilder()
-      .setTitle("🎛️ PANEL KANAŁU")
       .setColor("#5865F2")
-      .setDescription("Zarządzanie kanałem");
+      .setTitle("🎫 Ticket System")
+      .setDescription(
+`Ticket System:
+System ticketów pozwala kontaktować się ze staffem.
+
+━━━━━━━━━━━━━━━━━━
+
+Tworzenie ticketa:
+Kliknij przycisk, bot stworzy prywatny kanał.
+
+━━━━━━━━━━━━━━━━━━
+
+Używanie:
+Opisz problem jasno.
+
+━━━━━━━━━━━━━━━━━━
+
+Zamykanie:
+Staff zamyka ticket lub użytkownik.
+
+━━━━━━━━━━━━━━━━━━
+
+Zasady:
+• brak spamu
+• jeden problem = jeden ticket
+• szacunek dla staffu`
+      );
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId(`lock_${voice.id}`).setLabel("Zamknij").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`unlock_${voice.id}`).setLabel("Otwórz").setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId(`rename_${voice.id}`).setLabel("Rename").setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId(`delete_${voice.id}`).setLabel("Usuń").setStyle(ButtonStyle.Danger)
+      new ButtonBuilder()
+        .setCustomId("create_ticket")
+        .setLabel("Utwórz ticket")
+        .setStyle(ButtonStyle.Primary)
     );
 
-    panel.send({ embeds: [embed], components: [row] });
+    return message.channel.send({ embeds: [embed], components: [row] });
   }
 });
 
-// ================= BUTTONS =================
+// ================= TICKETS =================
 client.on("interactionCreate", async (i) => {
 
   if (!i.isButton()) return;
 
-  const [action, id] = i.customId.split("_");
-  const ch = i.guild.channels.cache.get(id);
-  if (!ch) return;
+  // CREATE TICKET
+  if (i.customId === "create_ticket") {
 
-  const owner = voiceOwners.get(id);
+    ticketCounter++;
 
-  if (i.user.id !== owner && !i.member.roles.cache.has(MOD_ROLE) && i.user.id !== OWNER_ID)
-    return i.reply({ content: "Brak dostępu", ephemeral: true });
+    const channel = await i.guild.channels.create({
+      name: `ticket-${ticketCounter}`,
+      type: ChannelType.GuildText,
+      permissionOverwrites: [
+        {
+          id: i.guild.id,
+          deny: [PermissionsBitField.Flags.ViewChannel]
+        },
+        {
+          id: i.user.id,
+          allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages]
+        },
+        {
+          id: MOD_ROLE,
+          allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages]
+        }
+      ]
+    });
 
-  if (action === "lock") {
-    await ch.permissionOverwrites.edit(i.guild.id, { Connect: false });
-    return i.reply({ content: "Kanał zamknięty", ephemeral: true });
+    tickets.set(channel.id, {
+      owner: i.user.id,
+      claimed: false
+    });
+
+    const embed = new EmbedBuilder()
+      .setColor("#00aaff")
+      .setTitle("🎫 Ticket utworzony")
+      .setDescription("Opisz problem.");
+
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("claim").setLabel("Claim").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("unclaim").setLabel("Unclaim").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
+    );
+
+    channel.send({ embeds: [embed], components: [row] });
+
+    return i.reply({ content: "Ticket utworzony", ephemeral: true });
   }
 
-  if (action === "unlock") {
-    await ch.permissionOverwrites.edit(i.guild.id, { Connect: true });
-    return i.reply({ content: "Kanał otwarty", ephemeral: true });
+  const ticket = tickets.get(i.channel.id);
+  if (!ticket) return;
+
+  // CLAIM
+  if (i.customId === "claim") {
+    if (!isMod(i.member)) return i.reply({ content: "Brak dostępu", ephemeral: true });
+
+    ticket.claimed = true;
+
+    i.channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor("Green")
+          .setDescription(`🔒 Ticket przejęty przez ${i.user.tag}`)
+      ]
+    });
+
+    return i.reply({ content: "Claim OK", ephemeral: true });
   }
 
-  if (action === "rename") {
+  // UNCLAIM
+  if (i.customId === "unclaim") {
+    if (!isMod(i.member)) return i.reply({ content: "Brak dostępu", ephemeral: true });
 
-    const modal = new ModalBuilder()
-      .setCustomId(`rename_${id}`)
-      .setTitle("Zmień nazwę");
+    ticket.claimed = false;
 
-    const input = new TextInputBuilder()
-      .setCustomId("name")
-      .setLabel("Nowa nazwa kanału")
-      .setStyle(TextInputStyle.Short);
+    i.channel.send({
+      embeds: [
+        new EmbedBuilder()
+          .setColor("Orange")
+          .setDescription(`🔓 Ticket oddany przez ${i.user.tag}`)
+      ]
+    });
 
-    modal.addComponents(new ActionRowBuilder().addComponents(input));
-
-    return i.showModal(modal);
+    return i.reply({ content: "Unclaim OK", ephemeral: true });
   }
 
-  if (action === "delete") {
-    voiceOwners.delete(id);
-    voiceBans.delete(id);
-    ch.delete().catch(() => {});
+  // CLOSE
+  if (i.customId === "close") {
+
+    const confirm = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("close_yes").setLabel("Tak").setStyle(ButtonStyle.Danger),
+      new ButtonBuilder().setCustomId("close_no").setLabel("Nie").setStyle(ButtonStyle.Secondary)
+    );
+
+    return i.reply({
+      content: "Na pewno zamknąć ticket?",
+      components: [confirm],
+      ephemeral: true
+    });
+  }
+
+  if (i.customId === "close_yes") {
+
+    const owner = ticket.owner;
+
+    const transcript = `Ticket ${i.channel.name} zamknięty`;
+
+    const user = await client.users.fetch(owner);
+    user.send(`📄 Transcript:\n${transcript}`).catch(() => {});
+
+    tickets.delete(i.channel.id);
+    i.channel.delete();
+
+  }
+
+  if (i.customId === "close_no") {
+    return i.reply({ content: "Anulowano", ephemeral: true });
   }
 });
 
-// ================= MODAL =================
-client.on("interactionCreate", async (i) => {
+// ================= MOD COMMANDS =================
+client.on("messageCreate", async (message) => {
 
-  if (!i.isModalSubmit()) return;
+  if (message.author.bot) return;
 
-  if (i.customId.startsWith("rename_")) {
+  if (message.content.startsWith("!ban")) {
+    if (!isMod(message.member)) return;
 
-    const id = i.customId.split("_")[1];
-    const ch = i.guild.channels.cache.get(id);
+    const user = message.mentions.members.first();
+    if (!user) return;
 
-    const name = i.fields.getTextInputValue("name");
+    user.ban();
+  }
 
-    await ch.setName(name);
+  if (message.content.startsWith("!unban")) {
+    if (!isMod(message.member)) return;
 
-    return i.reply({ content: "Zmieniono nazwę", ephemeral: true });
+    const id = message.content.split(" ")[1];
+    message.guild.members.unban(id);
+  }
+
+  if (message.content.startsWith("!clear")) {
+    if (!isMod(message.member)) return;
+
+    const amount = parseInt(message.content.split(" ")[1]);
+    message.channel.bulkDelete(amount);
+  }
+
+  if (message.content.startsWith("!info")) {
+
+    const user = message.mentions.users.first();
+    const member = await message.guild.members.fetch(user.id);
+
+    const embed = new EmbedBuilder()
+      .setColor("#00aaff")
+      .setTitle("USER INFO")
+      .addFields(
+        { name: "Nick", value: user.tag },
+        { name: "ID", value: user.id },
+        { name: "Role", value: member.roles.cache.map(r => r.name).join(", ") }
+      );
+
+    message.channel.send({ embeds: [embed] });
   }
 });
 
