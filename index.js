@@ -13,39 +13,35 @@ const {
 } = require("discord.js");
 
 const client = new Client({
-  intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMembers]
+  intents: [GatewayIntentBits.Guilds]
 });
 
-// ================= ROLES =================
+// ===== ROLE =====
 const OWNER_ROLE = "1497524742868045934";
 const MOD_ROLE = "1497541728306204712";
 
-// ================= COMMANDS =================
+// ===== SLASH COMMANDS =====
 const commands = [
   new SlashCommandBuilder()
     .setName("ping")
-    .setDescription("🏓 Sprawdza działanie bota"),
+    .setDescription("🏓 Ping bota"),
 
   new SlashCommandBuilder()
     .setName("ban")
-    .setDescription("🔨 Banuje użytkownika")
-    .addUserOption(o =>
-      o.setName("user").setDescription("Użytkownik").setRequired(true)
-    ),
+    .setDescription("🔨 Ban usera")
+    .addUserOption(o => o.setName("user").setDescription("User").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("kick")
-    .setDescription("👢 Wyrzuca użytkownika")
-    .addUserOption(o =>
-      o.setName("user").setDescription("Użytkownik").setRequired(true)
-    ),
+    .setDescription("👢 Kick usera")
+    .addUserOption(o => o.setName("user").setDescription("User").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("panel")
-    .setDescription("🎫 Otwiera panel ticketów")
+    .setDescription("🎫 Panel ticketów")
 ].map(c => c.toJSON());
 
-// ================= REGISTER =================
+// ===== REGISTER SLASHES =====
 const rest = new REST({ version: "10" }).setToken(process.env.TOKEN);
 
 client.once("ready", async () => {
@@ -55,176 +51,160 @@ client.once("ready", async () => {
     Routes.applicationCommands(client.user.id),
     { body: commands }
   );
+
+  console.log("Slash commands aktywne");
 });
 
-// ================= PERMISSION CHECK =================
-function isAllowed(member) {
-  return (
-    member.roles.cache.has(OWNER_ROLE) ||
-    member.roles.cache.has(MOD_ROLE)
-  );
+// ===== PERMISSION CHECK =====
+function hasPerm(member) {
+  return member.roles.cache.has(OWNER_ROLE) || member.roles.cache.has(MOD_ROLE);
 }
 
-// ================= INTERACTIONS =================
+// ===== INTERACTIONS =====
 client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isChatInputCommand()) return;
 
-  const member = interaction.member;
+  // ================= SLASH COMMANDS =================
+  if (interaction.isChatInputCommand()) {
 
-  // ================= PING =================
-  if (interaction.commandName === "ping") {
-    return interaction.reply("🏓 Pong! Bot działa stabilnie.");
+    const member = interaction.member;
+
+    // PING
+    if (interaction.commandName === "ping") {
+      return interaction.reply("🏓 Pong!");
+    }
+
+    // BAN
+    if (interaction.commandName === "ban") {
+      if (!hasPerm(member))
+        return interaction.reply({ content: "❌ brak permisji", ephemeral: true });
+
+      const user = interaction.options.getUser("user");
+      const target = await interaction.guild.members.fetch(user.id);
+
+      await target.ban();
+
+      const embed = new EmbedBuilder()
+        .setTitle("🔨 BAN")
+        .setDescription(`${user.tag} został zbanowany`)
+        .setColor("Red");
+
+      return interaction.reply({ embeds: [embed] });
+    }
+
+    // KICK
+    if (interaction.commandName === "kick") {
+      if (!hasPerm(member))
+        return interaction.reply({ content: "❌ brak permisji", ephemeral: true });
+
+      const user = interaction.options.getUser("user");
+      const target = await interaction.guild.members.fetch(user.id);
+
+      await target.kick();
+
+      const embed = new EmbedBuilder()
+        .setTitle("👢 KICK")
+        .setDescription(`${user.tag} został wyrzucony`)
+        .setColor("Orange");
+
+      return interaction.reply({ embeds: [embed] });
+    }
+
+    // PANEL
+    if (interaction.commandName === "panel") {
+
+      const embed = new EmbedBuilder()
+        .setTitle("🎫 TICKET PANEL")
+        .setDescription(
+          "📜 Regulamin:\n" +
+          "• Nie spamuj ticketów\n" +
+          "• Opisz problem\n\n" +
+          "Wybierz kategorię:"
+        )
+        .setColor("Blue");
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId("ticket_support")
+          .setLabel("💬 Support")
+          .setStyle(ButtonStyle.Primary),
+
+        new ButtonBuilder()
+          .setCustomId("ticket_report")
+          .setLabel("🚨 Report")
+          .setStyle(ButtonStyle.Danger)
+      );
+
+      return interaction.reply({ embeds: [embed], components: [row] });
+    }
   }
 
-  // ================= BAN =================
-  if (interaction.commandName === "ban") {
-    if (!isAllowed(member))
-      return interaction.reply({ content: "❌ Brak permisji", ephemeral: true });
+  // ================= TICKETS =================
+  if (interaction.isButton()) {
 
-    const user = interaction.options.getUser("user");
-    const target = await interaction.guild.members.fetch(user.id);
+    const guild = interaction.guild;
 
-    await target.ban();
+    // CREATE TICKET
+    if (interaction.customId.startsWith("ticket_")) {
 
-    const embed = new EmbedBuilder()
-      .setTitle("🔨 Ban wykonany")
-      .setDescription(`Użytkownik ${user.tag} został zbanowany.`)
-      .setColor("Red")
-      .setFooter({ text: "System moderacji" });
+      const category = await guild.channels.create({
+        name: "🎫 TICKETS",
+        type: ChannelType.GuildCategory
+      });
 
-    interaction.reply({ embeds: [embed] });
-  }
+      const channel = await guild.channels.create({
+        name: `ticket-${interaction.user.username}`,
+        type: ChannelType.GuildText,
+        parent: category.id,
+        permissionOverwrites: [
+          { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
+          { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
+        ]
+      });
 
-  // ================= KICK =================
-  if (interaction.commandName === "kick") {
-    if (!isAllowed(member))
-      return interaction.reply({ content: "❌ Brak permisji", ephemeral: true });
+      const embed = new EmbedBuilder()
+        .setTitle("🎫 Ticket otwarty")
+        .setDescription(
+          "👋 Witaj!\n\n" +
+          "🧠 Opisz swój problem\n" +
+          "⏳ Czekaj na administrację\n\n" +
+          "🔥 Nie spamuj"
+        )
+        .setColor("Green");
 
-    const user = interaction.options.getUser("user");
-    const target = await interaction.guild.members.fetch(user.id);
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId("claim")
+          .setLabel("🙋 Claim")
+          .setStyle(ButtonStyle.Success),
 
-    await target.kick();
+        new ButtonBuilder()
+          .setCustomId("close")
+          .setLabel("❌ Close")
+          .setStyle(ButtonStyle.Danger)
+      );
 
-    const embed = new EmbedBuilder()
-      .setTitle("👢 Kick wykonany")
-      .setDescription(`Użytkownik ${user.tag} został wyrzucony.`)
-      .setColor("Orange");
+      channel.send({ content: `<@${interaction.user.id}>`, embeds: [embed], components: [row] });
 
-    interaction.reply({ embeds: [embed] });
-  }
+      return interaction.reply({ content: "🎫 Ticket stworzony", ephemeral: true });
+    }
 
-  // ================= PANEL =================
-  if (interaction.commandName === "panel") {
-    const embed = new EmbedBuilder()
-      .setTitle("🎫 Ticket Center")
-      .setDescription(
-        "📜 **REGULAMIN TICKETÓW**\n\n" +
-        "• Nie twórz spam ticketów\n" +
-        "• Opisz dokładnie problem\n" +
-        "• Nie pinguj administracji bez powodu\n\n" +
-        "👇 Wybierz kategorię aby otworzyć ticket"
-      )
-      .setColor("Blue");
+    // CLAIM
+    if (interaction.customId === "claim") {
+      const embed = new EmbedBuilder()
+        .setTitle("🙋 Ticket przejęty")
+        .setDescription(`Przejął: ${interaction.user}`)
+        .setColor("Yellow");
 
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("ticket_support")
-        .setLabel("💬 Support")
-        .setStyle(ButtonStyle.Primary),
+      return interaction.channel.send({ embeds: [embed] });
+    }
 
-      new ButtonBuilder()
-        .setCustomId("ticket_report")
-        .setLabel("🚨 Report")
-        .setStyle(ButtonStyle.Danger)
-    );
-
-    interaction.reply({ embeds: [embed], components: [row] });
+    // CLOSE
+    if (interaction.customId === "close") {
+      await interaction.channel.send("❌ Ticket zamyka się za 5s...");
+      setTimeout(() => interaction.channel.delete(), 5000);
+    }
   }
 });
 
-// ================= TICKETS =================
-client.on("interactionCreate", async (interaction) => {
-  if (!interaction.isButton()) return;
-
-  const guild = interaction.guild;
-
-  // ================= CREATE TICKET =================
-  if (interaction.customId.startsWith("ticket_")) {
-
-    const category = await guild.channels.create({
-      name: "🎫・TICKETS",
-      type: ChannelType.GuildCategory
-    });
-
-    const channel = await guild.channels.create({
-      name: `ticket-${interaction.user.username}`,
-      type: ChannelType.GuildText,
-      parent: category.id,
-      permissionOverwrites: [
-        {
-          id: guild.id,
-          deny: [PermissionsBitField.Flags.ViewChannel]
-        },
-        {
-          id: interaction.user.id,
-          allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages]
-        }
-      ]
-    });
-
-    const embed = new EmbedBuilder()
-      .setTitle("🎫 Ticket utworzony")
-      .setDescription(
-        "👋 Witaj w swoim tickecie!\n\n" +
-        "📌 Opisz dokładnie problem\n" +
-        "⏳ Administracja zaraz się tobą zajmie\n\n" +
-        "⚡ Nie spamuj i czekaj cierpliwie"
-      )
-      .setColor("Green");
-
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("claim_ticket")
-        .setLabel("🙋 Claim")
-        .setStyle(ButtonStyle.Success),
-
-      new ButtonBuilder()
-        .setCustomId("close_ticket")
-        .setLabel("❌ Close")
-        .setStyle(ButtonStyle.Danger)
-    );
-
-    channel.send({ content: `<@${interaction.user.id}>`, embeds: [embed], components: [row] });
-
-    return interaction.reply({ content: "🎫 Ticket utworzony!", ephemeral: true });
-  }
-
-  // ================= CLAIM =================
-  if (interaction.customId === "claim_ticket") {
-
-    const embed = new EmbedBuilder()
-      .setTitle("🙋 Ticket przejęty")
-      .setDescription(`Ticket został przejęty przez ${interaction.user}`)
-      .setColor("Yellow");
-
-    interaction.channel.send({ embeds: [embed] });
-  }
-
-  // ================= CLOSE =================
-  if (interaction.customId === "close_ticket") {
-
-    const embed = new EmbedBuilder()
-      .setTitle("❌ Ticket zamknięty")
-      .setDescription("Ticket zostanie usunięty za 5 sekund...")
-      .setColor("Red");
-
-    await interaction.channel.send({ embeds: [embed] });
-
-    setTimeout(() => {
-      interaction.channel.delete();
-    }, 5000);
-  }
-});
-
-// ================= LOGIN =================
+// ===== LOGIN =====
 client.login(process.env.TOKEN);
