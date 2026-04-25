@@ -20,7 +20,7 @@ const TOKEN = process.env.TOKEN;
 const ROLE_OWNER = "1497524742868045934";
 const ROLE_MOD = "1497541728306204712";
 
-// staff call roles
+// staff calls
 const W1 = "1497527981822709840";
 const W2 = ["1497527830559588452","1497527748997157015"];
 const W3 = ["1497527663781351495","1497527565617729587","1497527457622790214"];
@@ -42,7 +42,9 @@ const tickets = new Map();
 const cooldown = new Map();
 const pendingClose = new Map();
 
-// ================= SAFE CHECKS =================
+// ================= SAFE FUNCTIONS =================
+const safeText = (t) => typeof t === "string" ? t : "Brak danych";
+
 const isMod = (m) =>
   m.roles.cache.has(ROLE_MOD) || m.roles.cache.has(ROLE_OWNER);
 
@@ -50,10 +52,10 @@ const isOwner = (m) =>
   m.roles.cache.has(ROLE_OWNER);
 
 // ================= TRANSCRIPT =================
-async function generateTranscript(channel) {
+async function transcript(channel) {
 
   const msgs = await channel.messages.fetch({ limit: 50 });
-  const sorted = [...msgs.values()].sort((a,b)=>a.createdTimestamp-b.createdTimestamp);
+  const sorted = [...msgs.values()].reverse();
 
   let html = `
 <html>
@@ -68,15 +70,15 @@ body{background:#2b2d31;color:white;font-family:Arial;padding:20px}
 </style>
 </head>
 <body>
-<h2>Transcript: ${channel.name}</h2>
+<h2>${channel.name}</h2>
 `;
 
   for (const m of sorted) {
     html += `
 <div class="msg">
-  <div class="a">${m.author?.tag || "unknown"}</div>
-  <div class="t">${new Date(m.createdTimestamp).toLocaleString()}</div>
-  <div>${m.content || "[embed/plik]"}</div>
+<div class="a">${safeText(m.author?.tag)}</div>
+<div class="t">${new Date(m.createdTimestamp).toLocaleString()}</div>
+<div>${safeText(m.content)}</div>
 </div>`;
   }
 
@@ -88,32 +90,35 @@ body{background:#2b2d31;color:white;font-family:Arial;padding:20px}
   return file;
 }
 
-// ================= COMMANDS =================
+// ================= COMMANDS (SAFE - NO UNDEFINED) =================
 const commands = [
-  new SlashCommandBuilder().setName("ping").setDescription("Ping bota"),
 
-  new SlashCommandBuilder().setName("panel").setDescription("Panel ticketów"),
+  new SlashCommandBuilder()
+    .setName("ping")
+    .setDescription("Ping bota"),
+
+  new SlashCommandBuilder()
+    .setName("panel")
+    .setDescription("Panel ticketów"),
 
   new SlashCommandBuilder()
     .setName("userinfo")
-    .setDescription("Info o użytkowniku")
+    .setDescription("Informacje o użytkowniku")
     .addUserOption(o =>
-      o.setName("user").setDescription("Użytkownik").setRequired(true)
+      o.setName("user")
+        .setDescription("Użytkownik")
+        .setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("clear")
-    .setDescription("Czyść chat")
+    .setDescription("Czyści wiadomości")
     .addIntegerOption(o =>
-      o.setName("ilosc").setDescription("Ilość").setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName("unban")
-    .setDescription("Unban user")
-    .addStringOption(o =>
-      o.setName("id").setDescription("ID").setRequired(true)
+      o.setName("ilosc")
+        .setDescription("Ilość")
+        .setRequired(true)
     )
+
 ].map(c => c.toJSON());
 
 // ================= READY =================
@@ -129,7 +134,7 @@ client.once("ready", async () => {
   console.log("BOT ONLINE");
 });
 
-// ================= WEZWANIA =================
+// ================= MESSAGE (WEZWANIA) =================
 client.on("messageCreate", async (msg) => {
 
   if (msg.author.bot) return;
@@ -140,7 +145,7 @@ client.on("messageCreate", async (msg) => {
   if (!t) return;
 
   if (!isMod(msg.member))
-    return msg.reply("Brak dostępu");
+    return msg.reply("Brak uprawnień");
 
   if (t.claimed)
     return msg.reply("Ticket przejęty");
@@ -160,10 +165,10 @@ client.on("messageCreate", async (msg) => {
   if (msg.content === "!w5") roles = W5;
 
   msg.channel.send({
-    content: roles.map(r=>`<@&${r}>`).join(" "),
+    content: roles.map(r => `<@&${r}>`).join(" "),
     embeds: [
       new EmbedBuilder()
-        .setTitle("Wezwanie staff")
+        .setTitle("Wezwanie")
         .setColor("#ED4245")
         .setDescription(msg.author.tag)
     ]
@@ -184,29 +189,11 @@ client.on("interactionCreate", async (i) => {
     const embed = new EmbedBuilder()
       .setTitle("PANEL TICKETÓW")
       .setColor("#5865F2")
-      .setDescription(
-`System ticketów
-
-Kliknij przycisk aby otworzyć ticket
-
-━━━━━━━━━━━━
-
-Zasady:
-• brak spamu
-• jeden problem = jeden ticket
-• szanuj administrację`
-      );
+      .setDescription("Kliknij przycisk aby otworzyć ticket");
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("ticket_help")
-        .setLabel("Pomoc")
-        .setStyle(ButtonStyle.Success),
-
-      new ButtonBuilder()
-        .setCustomId("ticket_report")
-        .setLabel("Zgłoszenie")
-        .setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId("ticket_help").setLabel("Pomoc").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("ticket_report").setLabel("Zgłoszenie").setStyle(ButtonStyle.Danger)
     );
 
     return i.reply({ embeds:[embed], components:[row] });
@@ -216,7 +203,7 @@ Zasady:
   if (i.isButton() && (i.customId === "ticket_help" || i.customId === "ticket_report")) {
 
     ticketID++;
-    const num = ticketID.toString().padStart(4,"0");
+    const num = String(ticketID).padStart(4,"0");
 
     const ch = await i.guild.channels.create({
       name:`ticket-${num}`,
@@ -231,8 +218,7 @@ Zasady:
 
     tickets.set(ch.id,{
       owner:i.user.id,
-      claimed:false,
-      num
+      claimed:false
     });
 
     const embed = new EmbedBuilder()
@@ -246,13 +232,9 @@ Zasady:
       new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
     );
 
-    await ch.send({
-      content:`<@&${ROLE_MOD}> <@&${ROLE_OWNER}>`,
-      embeds:[embed],
-      components:[row]
-    });
+    await ch.send({ embeds:[embed], components:[row] });
 
-    return i.reply({ content:`Ticket #${num}`, ephemeral:true });
+    return i.reply({ content:`Ticket ${num}`, ephemeral:true });
   }
 
   // ================= CLAIM =================
@@ -261,36 +243,9 @@ Zasady:
     if (!isMod(i.member))
       return i.reply({ ephemeral:true, content:"Brak dostępu" });
 
-    const t = tickets.get(i.channel.id);
-    t.claimed = true;
+    tickets.get(i.channel.id).claimed = true;
 
-    return i.update({
-      components:[
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId("unclaim").setLabel("Oddaj").setStyle(ButtonStyle.Secondary),
-          new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
-        )
-      ]
-    });
-  }
-
-  // ================= UNCLAIM =================
-  if (i.isButton() && i.customId === "unclaim") {
-
-    if (!isMod(i.member))
-      return i.reply({ ephemeral:true, content:"Brak dostępu" });
-
-    const t = tickets.get(i.channel.id);
-    t.claimed = false;
-
-    return i.update({
-      components:[
-        new ActionRowBuilder().addComponents(
-          new ButtonBuilder().setCustomId("claim").setLabel("Przejmij").setStyle(ButtonStyle.Success),
-          new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
-        )
-      ]
-    });
+    return i.update({ components:[] });
   }
 
   // ================= CLOSE =================
@@ -300,15 +255,10 @@ Zasady:
 
     if (isMod(i.member)) {
 
-      if (!t.claimed)
-        return i.reply({ ephemeral:true, content:"Najpierw przejmij" });
+      const file = await transcript(i.channel);
 
-      const file = await generateTranscript(i.channel);
-
-      const user = await client.users.fetch(t.owner).catch(()=>null);
-      if (user) {
-        user.send({ content:"Transcript:", files:[file] }).catch(()=>{});
-      }
+      const u = await client.users.fetch(t.owner).catch(()=>null);
+      if (u) u.send({ files:[file] });
 
       tickets.delete(i.channel.id);
 
@@ -337,12 +287,10 @@ Zasady:
     if (pendingClose.get(i.channel.id) !== i.user.id)
       return;
 
-    const file = await generateTranscript(i.channel);
+    const file = await transcript(i.channel);
 
-    const user = await client.users.fetch(t.owner).catch(()=>null);
-    if (user) {
-      user.send({ content:"Transcript:", files:[file] }).catch(()=>{});
-    }
+    const u = await client.users.fetch(t.owner).catch(()=>null);
+    if (u) u.send({ files:[file] });
 
     tickets.delete(i.channel.id);
     pendingClose.delete(i.channel.id);
