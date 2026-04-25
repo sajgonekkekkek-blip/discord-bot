@@ -326,5 +326,77 @@ client.on("interactionCreate", async (i) => {
     return i.reply({ ephemeral: true, content: `Unban ${id}` });
   }
 });
+const cooldown = new Set();
 
+client.on("messageCreate", async (message) => {
+  if (message.author.bot) return;
+
+  const allowedMods = [
+    MOD_ROLE,
+    OWNER_ROLE
+  ];
+
+  const member = message.member;
+  if (!member) return;
+
+  const hasPerm =
+    member.roles.cache.has(MOD_ROLE) ||
+    member.roles.cache.has(OWNER_ROLE) ||
+    member.id === OWNER_ID;
+
+  // cooldown 10s na spam w1-w5
+  if (cooldown.has(message.author.id)) return;
+
+  const callRole = async (roles, label) => {
+    if (!hasPerm) return;
+
+    cooldown.add(message.author.id);
+    setTimeout(() => cooldown.delete(message.author.id), 10000);
+
+    const roleMentions = roles.map(r => `<@&${r}>`).join(" ");
+
+    await message.channel.send({
+      embeds: [
+        {
+          title: "🚨 WEZWANIE ADMINISTRACJI",
+          color: 0xff3b3b,
+          description:
+            `**Wywołane przez:** <@${message.author.id}>\n` +
+            `**Typ:** ${label}\n\n` +
+            `Zespół administracyjny został powiadomiony.`,
+          footer: { text: "System powiadomień MOD" }
+        }
+      ]
+    });
+
+    await message.channel.send(roleMentions);
+  };
+
+  if (message.content === "!w1")
+    return callRole(["1497527981822709840"], "W1 - Niski priorytet");
+
+  if (message.content === "!w2")
+    return callRole(
+      ["1497527830559588452", "1497527748997157015"],
+      "W2 - Średni priorytet"
+    );
+
+  if (message.content === "!w3")
+    return callRole(
+      ["1497527663781351495", "1497527565617729587", "1497527457622790214"],
+      "W3 - Wysoki priorytet"
+    );
+
+  if (message.content === "!w4")
+    return callRole(
+      ["1497527300848091288", "1497527197886447656"],
+      "W4 - Bardzo wysoki priorytet"
+    );
+
+  if (message.content === "!w5")
+    return callRole(
+      ["1497528458711138406", "1497529283537797130", "1497529477150933023"],
+      "W5 - Krytyczny alert"
+    );
+});
 client.login(TOKEN);
