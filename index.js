@@ -12,9 +12,6 @@ const {
   ChannelType
 } = require("discord.js");
 
-const Database = require("better-sqlite3");
-
-// ================= TOKEN =================
 const TOKEN = process.env.TOKEN;
 
 // ================= ROLE =================
@@ -28,7 +25,6 @@ const W3 = ["1497527663781351495","1497527565617729587","1497527457622790214"];
 const W4 = ["1497527300848091288","1497527197886447656"];
 const W5 = ["1497528458711138406","1497529283537797130","1497529477150933023"];
 
-// ================= BOT =================
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -38,114 +34,85 @@ const client = new Client({
   ]
 });
 
-// ================= DB =================
-const db = new Database("xp.db");
-
-db.prepare(`
-CREATE TABLE IF NOT EXISTS xp (
-  user TEXT PRIMARY KEY,
-  xp INTEGER,
-  lvl INTEGER
-)`).run();
-
-// ================= SYSTEM =================
 let ticketID = 0;
 const tickets = new Map();
 const cooldown = new Map();
 
 // ================= PERMISJE =================
-function maDostep(m) {
-  return m.roles.cache.has(ROLE_OWNER) || m.roles.cache.has(ROLE_MOD);
-}
+const isMod = (m) =>
+  m.roles.cache.has(ROLE_MOD) || m.roles.cache.has(ROLE_OWNER);
 
-// ================= XP =================
-function addXP(id) {
-  let u = db.prepare("SELECT * FROM xp WHERE user=?").get(id);
-
-  if (!u) {
-    db.prepare("INSERT INTO xp VALUES (?,?,?)").run(id, 0, 0);
-    u = { xp: 0, lvl: 0 };
-  }
-
-  u.xp += 5;
-
-  if (u.xp >= 100) {
-    u.lvl++;
-    u.xp = 0;
-  }
-
-  db.prepare("UPDATE xp SET xp=?, lvl=? WHERE user=?")
-    .run(u.xp, u.lvl, id);
-
-  return u;
-}
+const isOwner = (m) =>
+  m.roles.cache.has(ROLE_OWNER);
 
 // ================= KOMENDY =================
 const commands = [
-  new SlashCommandBuilder()
-    .setName("ping")
-    .setDescription("Sprawdza działanie bota"),
+  new SlashCommandBuilder().setName("ping").setDescription("Sprawdź bota"),
 
-  new SlashCommandBuilder()
-    .setName("panel")
-    .setDescription("Panel ticketów"),
+  new SlashCommandBuilder().setName("panel").setDescription("Panel ticketów"),
 
   new SlashCommandBuilder()
     .setName("userinfo")
     .setDescription("Informacje o użytkowniku")
     .addUserOption(o =>
-      o.setName("uzytkownik")
-        .setDescription("Wybierz osobę")
+      o.setName("user")
+        .setDescription("Użytkownik")
         .setRequired(true)
     ),
 
   new SlashCommandBuilder()
     .setName("clear")
-    .setDescription("Usuwa wiadomości")
+    .setDescription("Usuń wiadomości")
     .addIntegerOption(o =>
       o.setName("ilosc")
-        .setDescription("Ile wiadomości usunąć")
+        .setDescription("Ilość")
         .setRequired(true)
-    )
-].map(c => c.toJSON());
+    ),
 
-const rest = new REST({ version: "10" }).setToken(TOKEN);
+  new SlashCommandBuilder()
+    .setName("unban")
+    .setDescription("Odbanuj użytkownika")
+    .addStringOption(o =>
+      o.setName("id")
+        .setDescription("ID użytkownika")
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("unbanall")
+    .setDescription("Odbanuj wszystkich (MOD+)"),
+
+  new SlashCommandBuilder()
+    .setName("banall")
+    .setDescription("Zbanuj wszystkich (OWNER)")
+].map(c => c.toJSON());
 
 // ================= READY =================
 client.once("ready", async () => {
-  console.log(`Zalogowano jako ${client.user.tag}`);
+  const rest = new REST({ version: "10" }).setToken(TOKEN);
 
   await rest.put(
     Routes.applicationCommands(client.user.id),
     { body: commands }
   );
+
+  console.log("Bot działa");
 });
 
 // ================= MESSAGE =================
 client.on("messageCreate", async (msg) => {
   if (msg.author.bot) return;
 
-  addXP(msg.author.id);
-
-  // linki
-  if (msg.content.includes("http")) {
-    if (!msg.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-      msg.delete().catch(()=>{});
-      msg.channel.send("Linki są zablokowane");
-    }
-  }
-
-  // caps
-  if (msg.content.length > 6 && msg.content === msg.content.toUpperCase()) {
-    msg.channel.send("Nie pisz capsami");
-  }
-
-  // wezwania
+  // WEZWANIA STAFF (TYLKO UNCLAIM)
   if (msg.content.startsWith("!w")) {
 
     const t = tickets.get(msg.channel.id);
-    if (!t || !t.claimed)
-      return msg.reply("Najpierw ticket musi być przejęty");
+
+    if (!t)
+      return msg.reply("Brak ticketa");
+
+    if (t.claimed)
+      return msg.reply("Ticket jest przejęty");
 
     const cd = cooldown.get(msg.author.id) || 0;
     if (Date.now() - cd < 15000)
@@ -161,77 +128,68 @@ client.on("messageCreate", async (msg) => {
     if (msg.content === "!w5") roles = W5;
 
     msg.channel.send({
+      content: roles.map(r => `<@&${r}>`).join(" "),
       embeds: [
         new EmbedBuilder()
-          .setTitle("Wezwanie administracji")
-          .setDescription(`Użytkownik ${msg.author} prosi o pomoc`)
+          .setTitle("🚨 Wezwanie pomocy")
           .setColor("#ED4245")
-      ],
-      content: roles.map(r => `<@&${r}>`).join(" ")
+          .setDescription(`Użytkownik ${msg.author.tag} potrzebuje pomocy`)
+      ]
     });
   }
 });
 
-// ================= INTERACTION =================
+// ================= INTERACTIONS =================
 client.on("interactionCreate", async (i) => {
 
   if (!i.isChatInputCommand()) return;
 
   // ================= PING =================
-  if (i.commandName === "ping") {
-    return i.reply("OK");
-  }
+  if (i.commandName === "ping")
+    return i.reply({ content: "OK", ephemeral: true });
 
   // ================= PANEL =================
   if (i.commandName === "panel") {
 
-    if (!maDostep(i.member))
+    if (!isMod(i.member))
       return i.reply({ content: "Brak dostępu", ephemeral: true });
 
     const embed = new EmbedBuilder()
       .setTitle("SYSTEM TICKETÓW")
       .setColor("#5865F2")
       .setDescription(
-`System ticketów serwera
+`System ticketów
 
-Tworzenie zgłoszeń:
-- wybierz kategorię
+Tworzenie:
 - kliknij przycisk
 
 Zasady:
 - brak spamu
 - jeden problem = jeden ticket
-- zachowuj kulturę
 
 Zamykanie:
-- tylko przejęty ticket może być zamknięty`
+- tylko przejęty ticket można zamknąć`
       );
 
     const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId("ticket_help")
-        .setLabel("Pomoc")
-        .setStyle(ButtonStyle.Success),
-
-      new ButtonBuilder()
-        .setCustomId("ticket_report")
-        .setLabel("Report")
-        .setStyle(ButtonStyle.Danger)
+      new ButtonBuilder().setCustomId("ticket_help").setLabel("Pomoc").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("ticket_report").setLabel("Report").setStyle(ButtonStyle.Danger)
     );
 
-    return i.reply({ embeds: [embed], components: [row] });
+    return i.reply({ embeds: [embed], components: [row], ephemeral: true });
   }
 
   // ================= USERINFO =================
   if (i.commandName === "userinfo") {
 
-    const u = i.options.getUser("uzytkownik");
+    const u = i.options.getUser("user");
     const m = await i.guild.members.fetch(u.id);
 
     return i.reply({
+      ephemeral: true,
       embeds: [
         new EmbedBuilder()
-          .setTitle("Informacje o użytkowniku")
+          .setTitle("INFO UŻYTKOWNIKA")
           .setColor("#5865F2")
           .setThumbnail(u.displayAvatarURL())
           .setDescription(
@@ -247,14 +205,57 @@ Dołączył: ${m.joinedAt?.toDateString()}`
   // ================= CLEAR =================
   if (i.commandName === "clear") {
 
-    if (!maDostep(i.member))
+    if (!isMod(i.member))
       return i.reply({ content: "Brak dostępu", ephemeral: true });
 
     const amount = i.options.getInteger("ilosc");
 
     const msgs = await i.channel.bulkDelete(amount, true);
 
-    return i.reply({ content: `Usunięto ${msgs.size} wiadomości`, ephemeral: true });
+    return i.reply({ content: `Usunięto ${msgs.size}`, ephemeral: true });
+  }
+
+  // ================= UNBAN =================
+  if (i.commandName === "unban") {
+
+    if (!isMod(i.member))
+      return i.reply({ content: "Brak dostępu", ephemeral: true });
+
+    const id = i.options.getString("id");
+
+    await i.guild.members.unban(id).catch(()=>{});
+
+    return i.reply({ content: `Odbanowano ${id}`, ephemeral: true });
+  }
+
+  // ================= UNBAN ALL =================
+  if (i.commandName === "unbanall") {
+
+    if (!isMod(i.member))
+      return i.reply({ content: "Brak dostępu", ephemeral: true });
+
+    const bans = await i.guild.bans.fetch();
+
+    for (const b of bans.values()) {
+      await i.guild.members.unban(b.user.id).catch(()=>{});
+    }
+
+    return i.reply({ content: "Odbanowano wszystkich", ephemeral: true });
+  }
+
+  // ================= BAN ALL =================
+  if (i.commandName === "banall") {
+
+    if (!isOwner(i.member))
+      return i.reply({ content: "Brak dostępu", ephemeral: true });
+
+    const members = await i.guild.members.fetch();
+
+    members.forEach(m => {
+      if (!m.user.bot) m.ban().catch(()=>{});
+    });
+
+    return i.reply({ content: "Ban all wykonany", ephemeral: true });
   }
 });
 
@@ -265,11 +266,11 @@ client.on("interactionCreate", async (i) => {
 
   const g = i.guild;
 
-  // ================= CREATE =================
+  // CREATE TICKET
   if (i.customId.startsWith("ticket")) {
 
     ticketID++;
-    const num = ticketID.toString().padStart(4, "0");
+    const num = ticketID.toString().padStart(4,"0");
 
     const ch = await g.channels.create({
       name: `ticket-${num}`,
@@ -290,7 +291,7 @@ client.on("interactionCreate", async (i) => {
     const embed = new EmbedBuilder()
       .setTitle(`TICKET #${num}`)
       .setColor("#57F287")
-      .setDescription("Opisz problem, czekaj na administrację");
+      .setDescription("Opisz problem");
 
     const row = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId("claim").setLabel("Przejmij").setStyle(ButtonStyle.Success),
@@ -298,27 +299,23 @@ client.on("interactionCreate", async (i) => {
       new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
     );
 
-    ch.send({ content: `<@&${ROLE_MOD}> <@${i.user.id}>`, embeds: [embed], components: [row] });
+    ch.send({ content: `<@&${ROLE_MOD}> <@${i.user.id}>`, embeds:[embed], components:[row] });
 
-    return i.reply({ content: `Ticket #${num} utworzony`, ephemeral: true });
+    return i.reply({ content:`Ticket #${num}`, ephemeral:true });
   }
 
-  // ================= CLAIM =================
+  // CLAIM
   if (i.customId === "claim") {
 
     const t = tickets.get(i.channel.id);
 
-    if (i.user.id === t.owner && !i.member.roles.cache.has(ROLE_OWNER))
-      return i.reply({ content: "Nie możesz przejąć swojego ticketu", ephemeral: true });
+    if (i.user.id === t.owner && !isOwner(i.member))
+      return i.reply({ content:"Nie możesz przejąć swojego ticketu", ephemeral:true });
 
     t.claimed = true;
 
-    const embed = new EmbedBuilder()
-      .setColor("#F1C40F")
-      .setDescription(`Ticket został przejęty przez ${i.user.tag}`);
-
     await i.update({
-      components: [
+      components:[
         new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId("unclaim").setLabel("Oddaj").setStyle(ButtonStyle.Secondary),
           new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
@@ -326,21 +323,23 @@ client.on("interactionCreate", async (i) => {
       ]
     });
 
-    return i.channel.send({ embeds: [embed] });
+    return i.channel.send({
+      embeds:[
+        new EmbedBuilder()
+          .setColor("#F1C40F")
+          .setDescription(`Ticket przejęty przez ${i.user.tag}`)
+      ]
+    });
   }
 
-  // ================= UNCLAIM =================
+  // UNCLAIM
   if (i.customId === "unclaim") {
 
     const t = tickets.get(i.channel.id);
     t.claimed = false;
 
-    const embed = new EmbedBuilder()
-      .setColor("#3498DB")
-      .setDescription(`Ticket został oddany przez ${i.user.tag}`);
-
     await i.update({
-      components: [
+      components:[
         new ActionRowBuilder().addComponents(
           new ButtonBuilder().setCustomId("claim").setLabel("Przejmij").setStyle(ButtonStyle.Success),
           new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
@@ -348,38 +347,28 @@ client.on("interactionCreate", async (i) => {
       ]
     });
 
-    return i.channel.send({ embeds: [embed] });
+    return i.channel.send({
+      embeds:[
+        new EmbedBuilder()
+          .setColor("#3498DB")
+          .setDescription(`Ticket oddany przez ${i.user.tag}`)
+      ]
+    });
   }
 
-  // ================= CLOSE (TYLKO CLAIMED) =================
+  // CLOSE (TYLKO CLAIMED)
   if (i.customId === "close") {
 
     const t = tickets.get(i.channel.id);
 
     if (!t.claimed)
-      return i.reply({ content: "Ticket musi być przejęty przed zamknięciem", ephemeral: true });
-
-    const msgs = await i.channel.messages.fetch({ limit: 50 });
-
-    let log = [];
-    msgs.reverse().forEach(m => log.push(`${m.author.tag}: ${m.content}`));
-
-    const user = await client.users.fetch(t.owner);
-
-    await user.send({
-      files: [{
-        attachment: Buffer.from(log.join("\n"), "utf8"),
-        name: `ticket-${t.num}.txt`
-      }]
-    }).catch(()=>{});
+      return i.reply({ content:"Ticket musi być przejęty", ephemeral:true });
 
     tickets.delete(i.channel.id);
 
-    await i.channel.send("Zamykanie ticketu...");
-
-    setTimeout(() => i.channel.delete(), 3000);
+    await i.channel.send("Zamykam ticket...");
+    setTimeout(()=>i.channel.delete(), 2000);
   }
 });
 
-// ================= LOGIN =================
 client.login(TOKEN);
