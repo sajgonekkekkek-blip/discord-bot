@@ -18,7 +18,7 @@ const Database = require("better-sqlite3");
 const TOKEN = process.env.TOKEN;
 
 // ================= ROLE =================
-const ROLE_OWNER = "1497524742868045934"; // może wszystko
+const ROLE_OWNER = "1497524742868045934";
 const ROLE_MOD = "1497541728306204712";
 
 // wezwania
@@ -55,10 +55,7 @@ const cooldown = new Map();
 
 // ================= PERMISJE =================
 function maDostep(m) {
-  return (
-    m.roles.cache.has(ROLE_OWNER) ||
-    m.roles.cache.has(ROLE_MOD)
-  );
+  return m.roles.cache.has(ROLE_OWNER) || m.roles.cache.has(ROLE_MOD);
 }
 
 // ================= XP =================
@@ -85,9 +82,31 @@ function addXP(id) {
 
 // ================= KOMENDY =================
 const commands = [
-  new SlashCommandBuilder().setName("ping").setDescription("Sprawdza działanie bota"),
-  new SlashCommandBuilder().setName("panel").setDescription("Panel systemu ticketów"),
-  new SlashCommandBuilder().setName("userinfo").setDescription("Informacje o użytkowniku")
+  new SlashCommandBuilder()
+    .setName("ping")
+    .setDescription("Sprawdza działanie bota"),
+
+  new SlashCommandBuilder()
+    .setName("panel")
+    .setDescription("Panel ticketów"),
+
+  new SlashCommandBuilder()
+    .setName("userinfo")
+    .setDescription("Informacje o użytkowniku")
+    .addUserOption(o =>
+      o.setName("uzytkownik")
+        .setDescription("Wybierz osobę")
+        .setRequired(true)
+    ),
+
+  new SlashCommandBuilder()
+    .setName("clear")
+    .setDescription("Usuwa wiadomości")
+    .addIntegerOption(o =>
+      o.setName("ilosc")
+        .setDescription("Ile wiadomości usunąć")
+        .setRequired(true)
+    )
 ].map(c => c.toJSON());
 
 const rest = new REST({ version: "10" }).setToken(TOKEN);
@@ -112,25 +131,25 @@ client.on("messageCreate", async (msg) => {
   if (msg.content.includes("http")) {
     if (!msg.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
       msg.delete().catch(()=>{});
-      msg.channel.send("🚫 Linki są zablokowane");
+      msg.channel.send("Linki są zablokowane");
     }
   }
 
   // caps
   if (msg.content.length > 6 && msg.content === msg.content.toUpperCase()) {
-    msg.channel.send("⚠️ Nie krzycz");
+    msg.channel.send("Nie pisz capsami");
   }
 
   // wezwania
   if (msg.content.startsWith("!w")) {
 
     const t = tickets.get(msg.channel.id);
-    if (!t || t.claimed)
-      return msg.reply("❌ Najpierw ticket musi być oddany (unclaim)");
+    if (!t || !t.claimed)
+      return msg.reply("Najpierw ticket musi być przejęty");
 
     const cd = cooldown.get(msg.author.id) || 0;
     if (Date.now() - cd < 15000)
-      return msg.reply("⏳ Poczekaj 15 sekund");
+      return msg.reply("Cooldown 15s");
 
     cooldown.set(msg.author.id, Date.now());
 
@@ -144,222 +163,221 @@ client.on("messageCreate", async (msg) => {
     msg.channel.send({
       embeds: [
         new EmbedBuilder()
-          .setTitle("🚨 WEZWANIE ADMINISTRACJI")
+          .setTitle("Wezwanie administracji")
+          .setDescription(`Użytkownik ${msg.author} prosi o pomoc`)
           .setColor("#ED4245")
-          .setDescription(`Użytkownik ${msg.author} prosi o pomoc w tickecie`)
       ],
       content: roles.map(r => `<@&${r}>`).join(" ")
     });
   }
 });
 
-// ================= INTERAKCJE =================
+// ================= INTERACTION =================
 client.on("interactionCreate", async (i) => {
 
-  // ===== SLASH =====
-  if (i.isChatInputCommand()) {
+  if (!i.isChatInputCommand()) return;
 
-    if (i.commandName === "ping")
-      return i.reply("🏓 Bot działa poprawnie");
+  // ================= PING =================
+  if (i.commandName === "ping") {
+    return i.reply("OK");
+  }
 
-    // ===== PANEL =====
-    if (i.commandName === "panel") {
+  // ================= PANEL =================
+  if (i.commandName === "panel") {
 
-      if (!maDostep(i.member))
-        return i.reply({ content: "❌ Brak dostępu", ephemeral: true });
+    if (!maDostep(i.member))
+      return i.reply({ content: "Brak dostępu", ephemeral: true });
 
-      const embed = new EmbedBuilder()
-        .setTitle("🎫 SYSTEM TICKETÓW")
-        .setColor("#5865F2")
-        .setDescription(
-`📌 SYSTEM TICKETÓW SERWERA
+    const embed = new EmbedBuilder()
+      .setTitle("SYSTEM TICKETÓW")
+      .setColor("#5865F2")
+      .setDescription(
+`System ticketów serwera
 
-━━━━━━━━━━━━━━━━━━━━
-System umożliwia kontakt z administracją.
+Tworzenie zgłoszeń:
+- wybierz kategorię
+- kliknij przycisk
 
-Każdy ticket to prywatny kanał.
+Zasady:
+- brak spamu
+- jeden problem = jeden ticket
+- zachowuj kulturę
 
-━━━━━━━━━━━━━━━━━━━━
-📁 TWORZENIE
-
-Kliknij przycisk aby utworzyć ticket.
-
-━━━━━━━━━━━━━━━━━━━━
-💬 ZASADY
-
-• opisz problem dokładnie
-• nie spamuj
-• zachowuj kulturę
-
-━━━━━━━━━━━━━━━━━━━━
-🔒 ZAMYKANIE
-
-Ticket zamyka administracja lub użytkownik
-
-━━━━━━━━━━━━━━━━━━━━`
-        );
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId("ticket_help")
-          .setLabel("Pomoc")
-          .setStyle(ButtonStyle.Success),
-
-        new ButtonBuilder()
-          .setCustomId("ticket_report")
-          .setLabel("Zgłoszenie")
-          .setStyle(ButtonStyle.Danger)
+Zamykanie:
+- tylko przejęty ticket może być zamknięty`
       );
 
-      return i.reply({ embeds: [embed], components: [row] });
-    }
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId("ticket_help")
+        .setLabel("Pomoc")
+        .setStyle(ButtonStyle.Success),
 
-    // ===== USERINFO =====
-    if (i.commandName === "userinfo") {
+      new ButtonBuilder()
+        .setCustomId("ticket_report")
+        .setLabel("Report")
+        .setStyle(ButtonStyle.Danger)
+    );
 
-      const u = i.options.getUser("user") || i.user;
-      const m = await i.guild.members.fetch(u.id);
+    return i.reply({ embeds: [embed], components: [row] });
+  }
 
-      return i.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle("👤 INFORMACJE O UŻYTKOWNIKU")
-            .setColor("#5865F2")
-            .setThumbnail(u.displayAvatarURL())
-            .setDescription(
+  // ================= USERINFO =================
+  if (i.commandName === "userinfo") {
+
+    const u = i.options.getUser("uzytkownik");
+    const m = await i.guild.members.fetch(u.id);
+
+    return i.reply({
+      embeds: [
+        new EmbedBuilder()
+          .setTitle("Informacje o użytkowniku")
+          .setColor("#5865F2")
+          .setThumbnail(u.displayAvatarURL())
+          .setDescription(
 `Nick: ${u.tag}
 ID: ${u.id}
 Konto: ${u.createdAt.toDateString()}
 Dołączył: ${m.joinedAt?.toDateString()}`
-            )
-        ]
-      });
-    }
+          )
+      ]
+    });
   }
 
-  // ===== BUTTONS =====
-  if (i.isButton()) {
+  // ================= CLEAR =================
+  if (i.commandName === "clear") {
 
-    const g = i.guild;
+    if (!maDostep(i.member))
+      return i.reply({ content: "Brak dostępu", ephemeral: true });
 
-    // ===== TICKET CREATE =====
-    if (i.customId.startsWith("ticket")) {
+    const amount = i.options.getInteger("ilosc");
 
-      ticketID++;
-      const num = ticketID.toString().padStart(4, "0");
+    const msgs = await i.channel.bulkDelete(amount, true);
 
-      const ch = await g.channels.create({
-        name: `ticket-${num}`,
-        type: ChannelType.GuildText,
-        permissionOverwrites: [
-          { id: g.id, deny: ["ViewChannel"] },
-          { id: i.user.id, allow: ["ViewChannel","SendMessages"] },
-          { id: ROLE_MOD, allow: ["ViewChannel","SendMessages"] }
-        ]
-      });
+    return i.reply({ content: `Usunięto ${msgs.size} wiadomości`, ephemeral: true });
+  }
+});
 
-      tickets.set(ch.id, {
-        owner: i.user.id,
-        claimed: false,
-        num
-      });
+// ================= BUTTONS =================
+client.on("interactionCreate", async (i) => {
 
-      const embed = new EmbedBuilder()
-        .setTitle(`🎫 TICKET #${num}`)
-        .setColor("#57F287")
-        .setDescription("Opisz swój problem, administracja wkrótce odpowie.");
+  if (!i.isButton()) return;
 
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("claim").setLabel("Przejmij ticket").setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId("unclaim").setLabel("Oddaj ticket").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId("close").setLabel("Zamknij ticket").setStyle(ButtonStyle.Danger)
-      );
+  const g = i.guild;
 
-      ch.send({ content: `<@&${ROLE_MOD}> <@${i.user.id}>`, embeds: [embed], components: [row] });
+  // ================= CREATE =================
+  if (i.customId.startsWith("ticket")) {
 
-      return i.reply({ content: `Ticket #${num} utworzony`, ephemeral: true });
-    }
+    ticketID++;
+    const num = ticketID.toString().padStart(4, "0");
 
-    // ===== CLAIM =====
-    if (i.customId === "claim") {
+    const ch = await g.channels.create({
+      name: `ticket-${num}`,
+      type: ChannelType.GuildText,
+      permissionOverwrites: [
+        { id: g.id, deny: ["ViewChannel"] },
+        { id: i.user.id, allow: ["ViewChannel","SendMessages"] },
+        { id: ROLE_MOD, allow: ["ViewChannel","SendMessages"] }
+      ]
+    });
 
-      const t = tickets.get(i.channel.id);
+    tickets.set(ch.id, {
+      owner: i.user.id,
+      claimed: false,
+      num
+    });
 
-      if (i.user.id === t.owner && !i.member.roles.cache.has(ROLE_OWNER))
-        return i.reply({ content: "❌ Nie możesz przejąć własnego ticketu", ephemeral: true });
+    const embed = new EmbedBuilder()
+      .setTitle(`TICKET #${num}`)
+      .setColor("#57F287")
+      .setDescription("Opisz problem, czekaj na administrację");
 
-      t.claimed = true;
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("claim").setLabel("Przejmij").setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId("unclaim").setLabel("Oddaj").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
+    );
 
-      const embed = new EmbedBuilder()
-        .setTitle("🔒 Ticket przejęty")
-        .setColor("#F1C40F")
-        .setDescription(`Ticket został przejęty przez ${i.user}`);
+    ch.send({ content: `<@&${ROLE_MOD}> <@${i.user.id}>`, embeds: [embed], components: [row] });
 
-      await i.update({
-        components: [
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId("unclaim").setLabel("Oddaj ticket").setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId("close").setLabel("Zamknij ticket").setStyle(ButtonStyle.Danger)
-          )
-        ]
-      });
+    return i.reply({ content: `Ticket #${num} utworzony`, ephemeral: true });
+  }
 
-      return i.channel.send({ embeds: [embed] });
-    }
+  // ================= CLAIM =================
+  if (i.customId === "claim") {
 
-    // ===== UNCLAIM =====
-    if (i.customId === "unclaim") {
+    const t = tickets.get(i.channel.id);
 
-      const t = tickets.get(i.channel.id);
-      t.claimed = false;
+    if (i.user.id === t.owner && !i.member.roles.cache.has(ROLE_OWNER))
+      return i.reply({ content: "Nie możesz przejąć swojego ticketu", ephemeral: true });
 
-      const embed = new EmbedBuilder()
-        .setTitle("🔓 Ticket oddany")
-        .setColor("#3498DB")
-        .setDescription(`Ticket został oddany przez ${i.user}`);
+    t.claimed = true;
 
-      await i.update({
-        components: [
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId("claim").setLabel("Przejmij ticket").setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId("close").setLabel("Zamknij ticket").setStyle(ButtonStyle.Danger)
-          )
-        ]
-      });
+    const embed = new EmbedBuilder()
+      .setColor("#F1C40F")
+      .setDescription(`Ticket został przejęty przez ${i.user.tag}`);
 
-      return i.channel.send({ embeds: [embed] });
-    }
+    await i.update({
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("unclaim").setLabel("Oddaj").setStyle(ButtonStyle.Secondary),
+          new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
+        )
+      ]
+    });
 
-    // ===== CLOSE =====
-    if (i.customId === "close") {
+    return i.channel.send({ embeds: [embed] });
+  }
 
-      const t = tickets.get(i.channel.id);
+  // ================= UNCLAIM =================
+  if (i.customId === "unclaim") {
 
-      const msgs = await i.channel.messages.fetch({ limit: 50 });
+    const t = tickets.get(i.channel.id);
+    t.claimed = false;
 
-      let log = [];
-      msgs.reverse().forEach(m => log.push(`${m.author.tag}: ${m.content}`));
+    const embed = new EmbedBuilder()
+      .setColor("#3498DB")
+      .setDescription(`Ticket został oddany przez ${i.user.tag}`);
 
-      const user = await client.users.fetch(t.owner);
+    await i.update({
+      components: [
+        new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId("claim").setLabel("Przejmij").setStyle(ButtonStyle.Success),
+          new ButtonBuilder().setCustomId("close").setLabel("Zamknij").setStyle(ButtonStyle.Danger)
+        )
+      ]
+    });
 
-      await user.send({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle(`📁 TRANSCRIPT TICKETA #${t.num}`)
-            .setColor("#5865F2")
-        ],
-        files: [{
-          attachment: Buffer.from(log.join("\n"), "utf8"),
-          name: `ticket-${t.num}.txt`
-        }]
-      }).catch(()=>{});
+    return i.channel.send({ embeds: [embed] });
+  }
 
-      tickets.delete(i.channel.id);
+  // ================= CLOSE (TYLKO CLAIMED) =================
+  if (i.customId === "close") {
 
-      await i.channel.send("❌ Zamykam ticket...");
+    const t = tickets.get(i.channel.id);
 
-      setTimeout(() => i.channel.delete(), 3000);
-    }
+    if (!t.claimed)
+      return i.reply({ content: "Ticket musi być przejęty przed zamknięciem", ephemeral: true });
+
+    const msgs = await i.channel.messages.fetch({ limit: 50 });
+
+    let log = [];
+    msgs.reverse().forEach(m => log.push(`${m.author.tag}: ${m.content}`));
+
+    const user = await client.users.fetch(t.owner);
+
+    await user.send({
+      files: [{
+        attachment: Buffer.from(log.join("\n"), "utf8"),
+        name: `ticket-${t.num}.txt`
+      }]
+    }).catch(()=>{});
+
+    tickets.delete(i.channel.id);
+
+    await i.channel.send("Zamykanie ticketu...");
+
+    setTimeout(() => i.channel.delete(), 3000);
   }
 });
 
