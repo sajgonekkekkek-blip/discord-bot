@@ -12,9 +12,10 @@ const {
   ChannelType
 } = require("discord.js");
 
+// ================= TOKEN =================
 const TOKEN = process.env.TOKEN;
 
-// ================= ROLES =================
+// ================= ROLE =================
 const OWNER_ROLE = "1497524742868045934";
 const MOD_ROLE = "1497541728306204712";
 
@@ -39,17 +40,17 @@ const commands = [
 
   new SlashCommandBuilder()
     .setName("clear")
-    .setDescription("🧹 clear messages")
+    .setDescription("🧹 usuwa wiadomości")
     .addIntegerOption(o => o.setName("ilosc").setDescription("ile").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("say")
-    .setDescription("📢 bot message")
-    .addStringOption(o => o.setName("text").setDescription("text").setRequired(true)),
+    .setDescription("📢 bot mówi embedem")
+    .addStringOption(o => o.setName("text").setDescription("tekst").setRequired(true)),
 
   new SlashCommandBuilder()
     .setName("userinfo")
-    .setDescription("👤 user info")
+    .setDescription("👤 info usera")
     .addUserOption(o => o.setName("user").setDescription("user").setRequired(true)),
 
   new SlashCommandBuilder()
@@ -141,7 +142,7 @@ client.on("interactionCreate", async (interaction) => {
 
       await interaction.channel.bulkDelete(amount, true);
 
-      return interaction.reply({ content: `🧹 usunięto ${amount} wiadomości`, ephemeral: true });
+      return interaction.reply({ content: `🧹 usunięto ${amount}`, ephemeral: true });
     }
 
     // SAY
@@ -177,44 +178,65 @@ client.on("interactionCreate", async (interaction) => {
       });
     }
 
-    // PANEL
+    // ================= PANEL (HIDDEN STYLE) =================
     if (interaction.commandName === "panel") {
 
-      return interaction.reply({
-        embeds: [
-          new EmbedBuilder()
-            .setTitle("🎫 SUPPORT CENTER")
-            .setDescription(
-              "📜 REGULAMIN TICKETÓW:\n" +
-              "• Nie spamuj\n" +
-              "• Opisz problem dokładnie\n" +
-              "• Szanuj administrację\n\n" +
-              "Wybierz kategorię:"
-            )
-            .setColor("#2b2d31")
-        ],
-        components: [
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder()
-              .setCustomId("ticket_support")
-              .setLabel("💬 Support")
-              .setEmoji("💬")
-              .setStyle(ButtonStyle.Primary),
+      if (!hasPerm(interaction.member))
+        return interaction.reply({ content: "❌ brak permisji", ephemeral: true });
 
-            new ButtonBuilder()
-              .setCustomId("ticket_report")
-              .setLabel("🚨 Report")
-              .setEmoji("🚨")
-              .setStyle(ButtonStyle.Danger),
+      const embed = new EmbedBuilder()
+        .setTitle("🎫 Ticket System")
+        .setDescription(
+          "━━━━━━━━━━━━━━━━━━━━\n" +
+          "📌 **System Ticketów**\n\n" +
+          "System ticketów pozwala na kontakt z administracją serwera w celu uzyskania pomocy, pytań lub zgłoszeń.\n\n" +
+          "━━━━━━━━━━━━━━━━━━━━\n\n" +
 
-            new ButtonBuilder()
-              .setCustomId("ticket_other")
-              .setLabel("❓ Other")
-              .setEmoji("❓")
-              .setStyle(ButtonStyle.Secondary)
-          )
-        ]
+          "🟢 Tworzenie ticketu\n" +
+          "Kliknij przycisk aby utworzyć prywatny kanał z administracją.\n\n" +
+
+          "💬 Używanie ticketu\n" +
+          "Opisz swój problem dokładnie i dodaj potrzebne informacje.\n\n" +
+
+          "🔒 Zamknięcie ticketu\n" +
+          "Ticket zamyka administracja lub użytkownik (jeśli dostępne).\n\n" +
+
+          "📜 Zasady:\n" +
+          "• Nie spamuj\n" +
+          "• Nie twórz wielu ticketów\n" +
+          "• Szanuj administrację\n\n" +
+          "━━━━━━━━━━━━━━━━━━━━"
+        )
+        .setColor("#2b2d31");
+
+      const row = new ActionRowBuilder().addComponents(
+        new ButtonBuilder()
+          .setCustomId("ticket_support")
+          .setLabel("💬 Support")
+          .setEmoji("💬")
+          .setStyle(ButtonStyle.Primary),
+
+        new ButtonBuilder()
+          .setCustomId("ticket_report")
+          .setLabel("🚨 Report")
+          .setEmoji("🚨")
+          .setStyle(ButtonStyle.Danger),
+
+        new ButtonBuilder()
+          .setCustomId("ticket_other")
+          .setLabel("❓ Other")
+          .setEmoji("❓")
+          .setStyle(ButtonStyle.Secondary)
+      );
+
+      await interaction.deferReply({ ephemeral: true });
+
+      await interaction.channel.send({
+        embeds: [embed],
+        components: [row]
       });
+
+      return interaction.editReply("✅ Panel wysłany");
     }
   }
 
@@ -223,7 +245,6 @@ client.on("interactionCreate", async (interaction) => {
 
     const guild = interaction.guild;
 
-    // CREATE CATEGORY
     let category = guild.channels.cache.find(c => c.name === "🎫・TICKETS");
 
     if (!category) {
@@ -241,10 +262,7 @@ client.on("interactionCreate", async (interaction) => {
         type: ChannelType.GuildText,
         parent: category.id,
         permissionOverwrites: [
-          {
-            id: guild.id,
-            deny: [PermissionsBitField.Flags.ViewChannel]
-          },
+          { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
           {
             id: interaction.user.id,
             allow: [
@@ -263,15 +281,13 @@ client.on("interactionCreate", async (interaction) => {
       });
 
       const embed = new EmbedBuilder()
-        .setTitle("🎫 TICKET OPENED")
+        .setTitle("🎫 TICKET OTWARTY")
         .setDescription(
-          "👋 Witaj w systemie wsparcia!\n\n" +
-          "📌 Status: 🟢 Open\n" +
+          "👋 Witaj!\n\n" +
+          "📌 Status: 🟢 OPEN\n" +
           "🔔 Administracja została powiadomiona\n\n" +
-          "📜 Instrukcje:\n" +
-          "• Opisz problem\n" +
-          "• Nie spamuj\n\n" +
-          "━━━━━━━━━━━━━━━━━━━━━━"
+          "📜 Opisz swój problem dokładnie\n\n" +
+          "━━━━━━━━━━━━━━━━━━━━"
         )
         .setColor("#57F287");
 
@@ -295,19 +311,11 @@ client.on("interactionCreate", async (interaction) => {
         components: [row]
       });
 
-      return interaction.reply({ content: "🎫 Ticket utworzony!", ephemeral: true });
+      return interaction.reply({ content: "🎫 Ticket stworzony", ephemeral: true });
     }
 
     // ================= CLAIM =================
     if (interaction.customId === "claim") {
-
-      const embed = new EmbedBuilder()
-        .setTitle("🔒 TICKET PRZEJĘTY")
-        .setDescription(
-          `🔒 Status: CLAIMED\n` +
-          `👮 Moderator: ${interaction.user.tag}`
-        )
-        .setColor("#FEE75C");
 
       await interaction.update({
         components: [
@@ -326,13 +334,15 @@ client.on("interactionCreate", async (interaction) => {
         ]
       });
 
-      return interaction.channel.send({ embeds: [embed] });
+      return interaction.channel.send(
+        `🔒 Ticket przejęty przez ${interaction.user}`
+      );
     }
 
     // ================= CLOSE =================
     if (interaction.customId === "close") {
 
-      await interaction.channel.send("❌ Ticket zamykany...");
+      await interaction.channel.send("❌ Zamykam ticket...");
 
       setTimeout(() => interaction.channel.delete(), 5000);
     }
