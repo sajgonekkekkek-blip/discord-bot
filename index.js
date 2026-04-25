@@ -12,9 +12,15 @@ const {
   ChannelType
 } = require("discord.js");
 
+const Database = require("better-sqlite3");
+const db = new Database("data.db");
+
+// ================= SETUP DB =================
+db.prepare("CREATE TABLE IF NOT EXISTS xp (user TEXT, xp INTEGER, lvl INTEGER)").run();
+
+// ================= CONFIG =================
 const TOKEN = process.env.TOKEN;
 
-// ================= ROLES =================
 const OWNER_ROLE = "1497524742868045934";
 const MOD_ROLE = "1497541728306204712";
 
@@ -28,24 +34,11 @@ const client = new Client({
   ]
 });
 
-// ================= DATA =================
-const xp = new Map();
-
 // ================= COMMANDS =================
 const commands = [
-  new SlashCommandBuilder().setName("ping").setDescription("🏓 Pong"),
-
-  new SlashCommandBuilder()
-    .setName("panel")
-    .setDescription("🎫 ticket panel"),
-
-  new SlashCommandBuilder()
-    .setName("rank")
-    .setDescription("📊 twój level"),
-
-  new SlashCommandBuilder()
-    .setName("reactionroles")
-    .setDescription("🎭 role panel")
+  new SlashCommandBuilder().setName("ping").setDescription("🏓 pong"),
+  new SlashCommandBuilder().setName("panel").setDescription("🎫 ticket panel"),
+  new SlashCommandBuilder().setName("rank").setDescription("📊 level"),
 ].map(c => c.toJSON());
 
 // ================= REGISTER =================
@@ -59,10 +52,10 @@ client.once("ready", async () => {
     { body: commands }
   );
 
-  console.log("V4 PRO READY");
+  console.log("V5 PRO READY");
 });
 
-// ================= PERMISSION =================
+// ================= PERM =================
 function hasPerm(member) {
   return (
     member.roles.cache.has(OWNER_ROLE) ||
@@ -70,70 +63,77 @@ function hasPerm(member) {
   );
 }
 
-// ================= LOGS =================
-async function log(guild, msg) {
+// ================= LOG =================
+function log(guild, msg) {
   const ch = guild.channels.cache.find(c => c.name === "logs");
   if (ch) ch.send(`📋 ${msg}`);
 }
 
-// ================= WELCOME =================
-client.on("guildMemberAdd", member => {
-  const channel = member.guild.channels.cache.find(c => c.name === "welcome");
-  if (!channel) return;
+// ================= XP =================
+function addXP(userId) {
+  let row = db.prepare("SELECT * FROM xp WHERE user=?").get(userId);
 
-  channel.send(`👋 Witaj ${member} na serwerze!`);
-});
-
-// ================= LEVEL SYSTEM + AUTOMOD =================
-client.on("messageCreate", async (message) => {
-  if (message.author.bot) return;
-
-  // XP
-  const data = xp.get(message.author.id) || { xp: 0, lvl: 0 };
-  data.xp += 5;
-
-  if (data.xp >= 100) {
-    data.lvl++;
-    data.xp = 0;
-    message.channel.send(`📊 ${message.author} level up → ${data.lvl}`);
+  if (!row) {
+    db.prepare("INSERT INTO xp VALUES (?,?,?)").run(userId, 0, 0);
+    row = { xp: 0, lvl: 0 };
   }
 
-  xp.set(message.author.id, data);
+  row.xp += 5;
 
-  const text = message.content.toLowerCase();
+  if (row.xp >= 100) {
+    row.lvl++;
+    row.xp = 0;
+  }
 
-  // LINK BLOCK
-  if (text.includes("http")) {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-      await message.delete();
-      return message.channel.send(`🚫 ${message.author} linki są zablokowane`);
+  db.prepare("UPDATE xp SET xp=?, lvl=? WHERE user=?")
+    .run(row.xp, row.lvl, userId);
+
+  return row;
+}
+
+// ================= MESSAGE SYSTEM =================
+client.on("messageCreate", async (msg) => {
+  if (msg.author.bot) return;
+
+  const data = addXP(msg.author.id);
+
+  // AUTOMOD
+  const t = msg.content.toLowerCase();
+
+  if (t.includes("http")) {
+    if (!msg.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+      await msg.delete();
+      msg.channel.send(`🚫 linki zablokowane`);
     }
   }
 
-  // CAPS BLOCK
-  if (message.content.length > 6 && message.content === message.content.toUpperCase()) {
-    if (!message.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
-      return message.channel.send(`⚠️ ${message.author} nie krzycz`);
+  if (msg.content.length > 6 && msg.content === msg.content.toUpperCase()) {
+    if (!msg.member.permissions.has(PermissionsBitField.Flags.ManageMessages)) {
+      msg.channel.send(`⚠️ nie krzycz`);
     }
+  }
+
+  if (data.xp === 0 && data.lvl > 0) {
+    msg.channel.send(`📊 ${msg.author} level up → ${data.lvl}`);
   }
 });
 
 // ================= INTERACTIONS =================
-client.on("interactionCreate", async (interaction) => {
+client.on("interactionCreate", async (i) => {
 
-  // ================= SLASH =================
-  if (interaction.isChatInputCommand()) {
+  // ===== SLASH =====
+  if (i.isChatInputCommand()) {
 
-    // PING
-    if (interaction.commandName === "ping") {
-      return interaction.reply("🏓 Pong!");
-    }
+    if (i.commandName === "ping")
+      return i.reply("🏓 pong");
 
     // PANEL
-    if (interaction.commandName === "panel") {
+    if (i.commandName === "panel") {
 
-      if (!hasPerm(interaction.member))
-        return interaction.reply({ content: "❌ brak permisji", ephemeral: true });
+      if (!hasPerm(i.member))
+        return i.reply({ content: "❌ brak permisji", ephemeral: true });
+
+      await i.deferReply({ ephemeral: true });
 
       const embed = new EmbedBuilder()
         .setTitle("🎫 TICKET SYSTEM")
@@ -152,47 +152,30 @@ client.on("interactionCreate", async (interaction) => {
           .setStyle(ButtonStyle.Danger)
       );
 
-      await interaction.channel.send({ embeds: [embed], components: [row] });
-      return interaction.reply({ content: "✅ panel wysłany", ephemeral: true });
+      await i.channel.send({ embeds: [embed], components: [row] });
+
+      return i.editReply("✅ wysłano panel");
     }
 
     // RANK
-    if (interaction.commandName === "rank") {
-      const d = xp.get(interaction.user.id) || { xp: 0, lvl: 0 };
+    if (i.commandName === "rank") {
+      const row = db.prepare("SELECT * FROM xp WHERE user=?").get(i.user.id) || { xp: 0, lvl: 0 };
 
-      return interaction.reply({
+      return i.reply({
         embeds: [
           new EmbedBuilder()
             .setTitle("📊 Rank")
-            .setDescription(`Level: ${d.lvl}\nXP: ${d.xp}/100`)
+            .setDescription(`Level: ${row.lvl}\nXP: ${row.xp}/100`)
             .setColor("Blue")
         ]
       });
     }
-
-    // REACTION ROLES PANEL
-    if (interaction.commandName === "reactionroles") {
-
-      const embed = new EmbedBuilder()
-        .setTitle("🎭 ROLE")
-        .setDescription("Kliknij aby dostać role")
-        .setColor("Purple");
-
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setCustomId("role_gamer")
-          .setLabel("🎮 Gamer")
-          .setStyle(ButtonStyle.Success)
-      );
-
-      return interaction.reply({ embeds: [embed], components: [row] });
-    }
   }
 
-  // ================= BUTTONS =================
-  if (interaction.isButton()) {
+  // ===== BUTTONS =====
+  if (i.isButton()) {
 
-    const guild = interaction.guild;
+    const guild = i.guild;
 
     let cat = guild.channels.cache.find(c => c.name === "🎫・TICKETS");
 
@@ -204,15 +187,15 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     // ================= TICKET =================
-    if (interaction.customId.startsWith("ticket_")) {
+    if (i.customId.startsWith("ticket_")) {
 
       const ch = await guild.channels.create({
-        name: `ticket-${interaction.user.username}`,
+        name: `ticket-${i.user.username}`,
         type: ChannelType.GuildText,
         parent: cat.id,
         permissionOverwrites: [
           { id: guild.id, deny: [PermissionsBitField.Flags.ViewChannel] },
-          { id: interaction.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
+          { id: i.user.id, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] },
           { id: MOD_ROLE, allow: [PermissionsBitField.Flags.ViewChannel, PermissionsBitField.Flags.SendMessages] }
         ]
       });
@@ -235,17 +218,18 @@ client.on("interactionCreate", async (interaction) => {
       );
 
       ch.send({
-        content: `<@&${MOD_ROLE}> <@${interaction.user.id}>`,
+        content: `<@&${MOD_ROLE}> <@${i.user.id}>`,
         embeds: [embed],
         components: [row]
       });
 
-      return interaction.reply({ content: "🎫 ticket stworzony", ephemeral: true });
+      return i.reply({ content: "🎫 ticket created", ephemeral: true });
     }
 
-    // CLAIM
-    if (interaction.customId === "claim") {
-      await interaction.update({
+    // ================= CLAIM =================
+    if (i.customId === "claim") {
+
+      await i.update({
         components: [
           new ActionRowBuilder().addComponents(
             new ButtonBuilder()
@@ -262,26 +246,31 @@ client.on("interactionCreate", async (interaction) => {
         ]
       });
 
-      return interaction.channel.send(`🔒 przejęty przez ${interaction.user}`);
+      return i.channel.send(`🔒 przejęty przez ${i.user}`);
     }
 
-    // CLOSE
-    if (interaction.customId === "close") {
-      await interaction.channel.send("❌ zamykam...");
-      setTimeout(() => interaction.channel.delete(), 4000);
-    }
+    // ================= CLOSE + TRANSCRIPT =================
+    if (i.customId === "close") {
 
-    // REACTION ROLE
-    if (interaction.customId === "role_gamer") {
-      const role = interaction.guild.roles.cache.find(r => r.name === "Gamer");
-      const member = interaction.member;
+      const messages = await i.channel.messages.fetch({ limit: 50 });
+      let html = "<h1>Ticket Transcript</h1>";
 
-      if (role) {
-        member.roles.add(role);
-        return interaction.reply({ content: "🎮 dostałeś role Gamer", ephemeral: true });
-      }
+      messages.reverse().forEach(m => {
+        html += `<p><b>${m.author.tag}:</b> ${m.content}</p>`;
+      });
+
+      log(i.guild, `Ticket closed: ${i.channel.name}`);
+
+      await i.channel.send("❌ zamykam ticket...");
+      setTimeout(() => i.channel.delete(), 4000);
     }
   }
+});
+
+// ================= ANTI RAID =================
+client.on("guildMemberAdd", async (member) => {
+  const logs = member.guild.channels.cache.find(c => c.name === "logs");
+  if (logs) logs.send(`👋 join: ${member.user.tag}`);
 });
 
 // ================= LOGIN =================
