@@ -3,26 +3,27 @@ const {
   GatewayIntentBits,
   EmbedBuilder,
   ChannelType,
-  PermissionFlagsBits,
-  SlashCommandBuilder,
-  REST,
-  Routes,
   ActionRowBuilder,
   ButtonBuilder,
-  ButtonStyle
+  ButtonStyle,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle
 } = require("discord.js");
 
 const axios = require("axios");
 
 // ================= CONFIG =================
 const TOKEN = process.env.TOKEN;
-const CLIENT_ID = process.env.CLIENT_ID;
-const GUILD_ID = process.env.GUILD_ID;
 const OPENAI_KEY = process.env.OPENAI_KEY;
 
 const AI_CHANNEL_ID = "1497629571275559042";
-const OWNER_ID = "1311750832374419535";
+const CREATE_CHANNEL_ID = "1497611703280734428";
+const VOICE_CATEGORY_ID = "1497524528060956723";
+
 const MOD_ROLE = "1497541728306204712";
+const OWNER_ROLE = "1497524742868045934";
+const OWNER_ID = "1311750832374419535";
 
 // ================= CLIENT =================
 const client = new Client({
@@ -30,196 +31,191 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.GuildMembers,
+    GatewayIntentBits.GuildVoiceStates
   ]
 });
 
-// ================= PERMISSIONS =================
-function isOwner(i) {
-  return i.user.id === OWNER_ID;
-}
-
-function isMod(i) {
-  return isOwner(i) || i.member.roles.cache.has(MOD_ROLE);
-}
-
-// ================= SLASH COMMANDS =================
-const commands = [
-  new SlashCommandBuilder()
-    .setName("clear")
-    .setDescription("Czyści wiadomości")
-    .addIntegerOption(o =>
-      o.setName("ilosc").setDescription("Ile wiadomości").setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName("ban")
-    .setDescription("Banuje użytkownika")
-    .addUserOption(o =>
-      o.setName("user").setDescription("Użytkownik").setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName("unban")
-    .setDescription("Odbanowuje użytkownika")
-    .addStringOption(o =>
-      o.setName("id").setDescription("ID użytkownika").setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName("say")
-    .setDescription("Bot wysyła wiadomość")
-    .addStringOption(o =>
-      o.setName("text").setDescription("Treść").setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName("info")
-    .setDescription("Informacje o użytkowniku")
-    .addUserOption(o =>
-      o.setName("user").setDescription("Użytkownik").setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName("panel")
-    .setDescription("Panel systemu (tylko owner)")
-].map(c => c.toJSON());
-
-// ================= REGISTER COMMANDS =================
-const rest = new REST({ version: "10" }).setToken(TOKEN);
-
-(async () => {
-  await rest.put(
-    Routes.applicationGuildCommands(CLIENT_ID, GUILD_ID),
-    { body: commands }
-  );
-})();
+// ================= STATE =================
+const voiceOwners = new Map();
+const voiceBans = new Map();
 
 // ================= READY =================
-client.once("ready", () => {
+client.once("ready", async () => {
   console.log("BOT ONLINE");
 });
 
-// ================= AI =================
+// ================= AI (NAPRAWIONE) =================
 client.on("messageCreate", async (message) => {
 
   if (message.author.bot) return;
   if (message.channel.id !== AI_CHANNEL_ID) return;
 
+  if (!OPENAI_KEY) {
+    return message.reply("❌ Brak OPENAI_KEY w konfiguracji bota.");
+  }
+
   try {
 
-    const res = await axios.post("https://api.openai.com/v1/chat/completions", {
-      model: "gpt-4o-mini",
-      messages: [
-        { role: "system", content: "Pomocny asystent Discord." },
-        { role: "user", content: message.content }
-      ]
-    }, {
-      headers: {
-        Authorization: `Bearer ${OPENAI_KEY}`
+    await message.channel.sendTyping();
+
+    const res = await axios.post(
+      "https://api.openai.com/v1/chat/completions",
+      {
+        model: "gpt-4o-mini",
+        messages: [
+          {
+            role: "system",
+            content: "Jesteś pomocnym asystentem Discord. Odpowiadasz po polsku."
+          },
+          {
+            role: "user",
+            content: message.content
+          }
+        ]
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${OPENAI_KEY}`,
+          "Content-Type": "application/json"
+        }
       }
-    });
+    );
 
-    const reply = res.data.choices?.[0]?.message?.content;
+    const reply = res.data?.choices?.[0]?.message?.content;
 
-    message.reply({
+    if (!reply) {
+      return message.reply("❌ AI nie zwróciło odpowiedzi.");
+    }
+
+    return message.reply({
       embeds: [
         new EmbedBuilder()
+          .setTitle("🤖 AI Assistant")
           .setColor("#0099ff")
-          .setTitle("AI")
-          .setDescription(reply?.slice(0, 4000) || "Brak odpowiedzi")
+          .setDescription(reply.slice(0, 4000))
       ]
     });
 
   } catch (e) {
-    console.log(e.message);
-    message.reply("AI error.");
+
+    const err =
+      e?.response?.data?.error?.message ||
+      e?.response?.data ||
+      e?.message;
+
+    console.log("OPENAI ERROR:", err);
+
+    return message.reply("❌ AI chwilowo nie działa: `" + err + "`");
   }
 });
 
-// ================= SLASH HANDLER =================
-client.on("interactionCreate", async (i) => {
+// ================= VOICE SYSTEM =================
+client.on("voiceStateUpdate", async (oldState, newState) => {
 
-  if (!i.isChatInputCommand()) return;
+  if (newState.channelId === CREATE_CHANNEL_ID) {
 
-  // CLEAR
-  if (i.commandName === "clear") {
-    if (!isMod(i)) return i.reply({ content: "Brak uprawnień", ephemeral: true });
+    const member = newState.member;
 
-    const amount = i.options.getInteger("ilosc");
-    const msgs = await i.channel.bulkDelete(amount, true);
+    const voice = await newState.guild.channels.create({
+      name: `kanal-${member.user.username}`,
+      type: ChannelType.GuildVoice,
+      parent: VOICE_CATEGORY_ID
+    });
 
-    return i.reply({ content: `Usunięto ${msgs.size} wiadomości`, ephemeral: true });
-  }
-
-  // BAN
-  if (i.commandName === "ban") {
-    if (!isMod(i)) return i.reply({ content: "Brak uprawnień", ephemeral: true });
-
-    const user = i.options.getUser("user");
-    await i.guild.members.ban(user.id);
-
-    return i.reply({ content: `Zbanowano ${user.tag}`, ephemeral: true });
-  }
-
-  // UNBAN
-  if (i.commandName === "unban") {
-    if (!isMod(i)) return i.reply({ content: "Brak uprawnień", ephemeral: true });
-
-    const id = i.options.getString("id");
-    await i.guild.members.unban(id);
-
-    return i.reply({ content: `Odbanowano ${id}`, ephemeral: true });
-  }
-
-  // SAY
-  if (i.commandName === "say") {
-    if (!isOwner(i)) return i.reply({ content: "Tylko owner", ephemeral: true });
-
-    const text = i.options.getString("text");
-
-    await i.channel.send({
-      embeds: [
-        new EmbedBuilder()
-          .setColor("Green")
-          .setDescription(text)
+    const panel = await newState.guild.channels.create({
+      name: `panel-${member.user.username}`,
+      type: ChannelType.GuildText,
+      parent: VOICE_CATEGORY_ID,
+      permissionOverwrites: [
+        { id: newState.guild.id, deny: ["ViewChannel"] },
+        { id: member.id, allow: ["ViewChannel", "SendMessages"] }
       ]
     });
 
-    return i.reply({ content: "Wysłano", ephemeral: true });
-  }
+    voiceOwners.set(voice.id, member.id);
+    voiceBans.set(voice.id, new Set());
 
-  // INFO
-  if (i.commandName === "info") {
-
-    const user = i.options.getUser("user");
-    const member = await i.guild.members.fetch(user.id);
+    await member.voice.setChannel(voice);
 
     const embed = new EmbedBuilder()
-      .setColor("#00aaff")
-      .setTitle("INFO USER")
-      .addFields(
-        { name: "Nick", value: user.tag },
-        { name: "ID", value: user.id },
-        { name: "Role", value: member.roles.cache.map(r => r.name).join(", ") }
-      );
+      .setTitle("🎛️ PANEL KANAŁU")
+      .setColor("#5865F2")
+      .setDescription("Zarządzanie kanałem");
 
-    return i.reply({ embeds: [embed], ephemeral: true });
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`lock_${voice.id}`).setLabel("Zamknij").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`unlock_${voice.id}`).setLabel("Otwórz").setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId(`rename_${voice.id}`).setLabel("Rename").setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId(`delete_${voice.id}`).setLabel("Usuń").setStyle(ButtonStyle.Danger)
+    );
+
+    panel.send({ embeds: [embed], components: [row] });
+  }
+});
+
+// ================= BUTTONS =================
+client.on("interactionCreate", async (i) => {
+
+  if (!i.isButton()) return;
+
+  const [action, id] = i.customId.split("_");
+  const ch = i.guild.channels.cache.get(id);
+  if (!ch) return;
+
+  const owner = voiceOwners.get(id);
+
+  if (i.user.id !== owner && !i.member.roles.cache.has(MOD_ROLE) && i.user.id !== OWNER_ID)
+    return i.reply({ content: "Brak dostępu", ephemeral: true });
+
+  if (action === "lock") {
+    await ch.permissionOverwrites.edit(i.guild.id, { Connect: false });
+    return i.reply({ content: "Kanał zamknięty", ephemeral: true });
   }
 
-  // PANEL
-  if (i.commandName === "panel") {
-    if (!isOwner(i)) return i.reply({ content: "Brak dostępu", ephemeral: true });
+  if (action === "unlock") {
+    await ch.permissionOverwrites.edit(i.guild.id, { Connect: true });
+    return i.reply({ content: "Kanał otwarty", ephemeral: true });
+  }
 
-    return i.reply({
-      embeds: [
-        new EmbedBuilder()
-          .setTitle("Panel systemu")
-          .setColor("#5865F2")
-          .setDescription("System aktywny")
-      ],
-      ephemeral: true
-    });
+  if (action === "rename") {
+
+    const modal = new ModalBuilder()
+      .setCustomId(`rename_${id}`)
+      .setTitle("Zmień nazwę");
+
+    const input = new TextInputBuilder()
+      .setCustomId("name")
+      .setLabel("Nowa nazwa kanału")
+      .setStyle(TextInputStyle.Short);
+
+    modal.addComponents(new ActionRowBuilder().addComponents(input));
+
+    return i.showModal(modal);
+  }
+
+  if (action === "delete") {
+    voiceOwners.delete(id);
+    voiceBans.delete(id);
+    ch.delete().catch(() => {});
+  }
+});
+
+// ================= MODAL =================
+client.on("interactionCreate", async (i) => {
+
+  if (!i.isModalSubmit()) return;
+
+  if (i.customId.startsWith("rename_")) {
+
+    const id = i.customId.split("_")[1];
+    const ch = i.guild.channels.cache.get(id);
+
+    const name = i.fields.getTextInputValue("name");
+
+    await ch.setName(name);
+
+    return i.reply({ content: "Zmieniono nazwę", ephemeral: true });
   }
 });
 
