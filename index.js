@@ -17,7 +17,9 @@ const TOKEN = process.env.TOKEN;
 const OWNER_ID = "1311750832374419535";
 const MOD_ROLE = "1497541728306204712";
 const OWNER_ROLE = "1497524742868045934";
+
 const CREATE_CHANNEL_ID = "1497611703280734428";
+const VOICE_CATEGORY_ID = "1497524528060956723";
 
 // ================= CLIENT =================
 const client = new Client({
@@ -32,9 +34,11 @@ const client = new Client({
 
 // ================= STATE =================
 let ticketCounter = 0;
-const cooldown = new Map();
-const closeConfirm = new Map();
+
 const voiceOwners = new Map();
+const voicePanels = new Map();
+const voiceBans = new Map();
+const voiceTimeouts = new Map();
 
 // ================= PERMS =================
 function isMod(member) {
@@ -45,7 +49,7 @@ function isMod(member) {
   );
 }
 
-// ================= SLASH COMMANDS =================
+// ================= SLASH =================
 const commands = [
   new SlashCommandBuilder().setName("panel").setDescription("Panel ticketów"),
 
@@ -54,20 +58,6 @@ const commands = [
     .setDescription("Informacje o użytkowniku")
     .addUserOption(o =>
       o.setName("user").setDescription("Użytkownik").setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName("clear")
-    .setDescription("Czyści wiadomości")
-    .addIntegerOption(o =>
-      o.setName("ilosc").setDescription("Ilość").setRequired(true)
-    ),
-
-  new SlashCommandBuilder()
-    .setName("say")
-    .setDescription("Bot pisze wiadomość")
-    .addStringOption(o =>
-      o.setName("text").setDescription("Tekst").setRequired(true)
     )
 ].map(c => c.toJSON());
 
@@ -86,15 +76,13 @@ client.once("ready", async () => {
 // ================= INTERACTIONS =================
 client.on("interactionCreate", async (i) => {
 
-  // ================= SLASH =================
   if (i.isChatInputCommand()) {
 
     if (i.commandName === "panel") {
-
       const embed = new EmbedBuilder()
         .setTitle("🎫 PANEL TICKETÓW")
         .setColor("#5865F2")
-        .setDescription("Kliknij aby stworzyć ticket");
+        .setDescription("Kliknij aby utworzyć ticket");
 
       const row = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId("ticket_help").setLabel("Pomoc").setStyle(ButtonStyle.Success),
@@ -117,161 +105,112 @@ client.on("interactionCreate", async (i) => {
         ephemeral: true
       });
     }
-
-    if (i.commandName === "clear") {
-      if (!isMod(i.member))
-        return i.reply({ content: "Brak permisji", ephemeral: true });
-
-      const amount = i.options.getInteger("ilosc");
-      const deleted = await i.channel.bulkDelete(amount, true);
-
-      return i.reply({ content: `Usunięto ${deleted.size}`, ephemeral: true });
-    }
-
-    if (i.commandName === "say") {
-      if (!isMod(i.member))
-        return i.reply({ content: "Brak permisji", ephemeral: true });
-
-      const text = i.options.getString("text");
-
-      await i.reply({ content: "wysłano", ephemeral: true });
-      return i.channel.send(text);
-    }
   }
 
-  // ================= BUTTONS =================
-  if (i.isButton()) {
+  if (!i.isButton()) return;
 
-    // ========== TICKET ==========
-    if (i.customId === "ticket_help" || i.customId === "ticket_report") {
+  // ================= TICKET =================
+  if (i.customId === "ticket_help" || i.customId === "ticket_report") {
 
-      ticketCounter++;
-      const id = String(ticketCounter).padStart(4, "0");
+    ticketCounter++;
+    const id = String(ticketCounter).padStart(4, "0");
 
-      const ch = await i.guild.channels.create({
-        name: `ticket-${id}`,
-        type: ChannelType.GuildText,
-        permissionOverwrites: [
-          { id: i.guild.id, deny: ["ViewChannel"] },
-          { id: i.user.id, allow: ["ViewChannel", "SendMessages"] },
-          { id: MOD_ROLE, allow: ["ViewChannel", "SendMessages"] },
-          { id: OWNER_ROLE, allow: ["ViewChannel", "SendMessages"] }
-        ]
-      });
+    const ch = await i.guild.channels.create({
+      name: `ticket-${id}`,
+      type: ChannelType.GuildText,
+      permissionOverwrites: [
+        { id: i.guild.id, deny: ["ViewChannel"] },
+        { id: i.user.id, allow: ["ViewChannel", "SendMessages"] },
+        { id: MOD_ROLE, allow: ["ViewChannel", "SendMessages"] },
+        { id: OWNER_ROLE, allow: ["ViewChannel", "SendMessages"] }
+      ]
+    });
 
-      const embed = new EmbedBuilder()
-        .setTitle(`🎫 TICKET #${id}`)
-        .setColor("#57F287")
-        .setDescription("Opisz problem");
+    const embed = new EmbedBuilder()
+      .setTitle(`🎫 TICKET #${id}`)
+      .setColor("#57F287")
+      .setDescription("Opisz problem");
 
-      const row = new ActionRowBuilder().addComponents(
-        new ButtonBuilder().setCustomId("claim").setLabel("Claim").setStyle(ButtonStyle.Success),
-        new ButtonBuilder().setCustomId("unclaim").setLabel("Unclaim").setStyle(ButtonStyle.Secondary),
-        new ButtonBuilder().setCustomId("close").setLabel("Close").setStyle(ButtonStyle.Danger)
-      );
+    const row = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId("claim").setLabel("Claim").setStyle(2),
+      new ButtonBuilder().setCustomId("unclaim").setLabel("Unclaim").setStyle(2),
+      new ButtonBuilder().setCustomId("close").setLabel("Close").setStyle(4)
+    );
 
-      await ch.send({ content: `<@&${MOD_ROLE}>`, embeds: [embed], components: [row] });
+    await ch.send({ content: `<@&${MOD_ROLE}>`, embeds: [embed], components: [row] });
 
-      return i.reply({ content: "ticket utworzony", ephemeral: true });
+    return i.reply({ content: "ticket utworzony", ephemeral: true });
+  }
+
+  // ================= VOICE ACTIONS =================
+  const [action, channelId] = i.customId.split("_");
+
+  if (voiceOwners.has(channelId)) {
+
+    const channel = i.guild.channels.cache.get(channelId);
+    const owner = voiceOwners.get(channelId);
+    const bans = voiceBans.get(channelId);
+
+    if (!channel) return;
+
+    // block banned users
+    if (bans?.has(i.user.id)) {
+      return i.reply({ content: "Jesteś zbanowany z tego kanału", ephemeral: true });
     }
 
-    // ========== CLAIM ==========
-    if (i.customId === "claim") {
-      if (!isMod(i.member))
-        return i.reply({ content: "Brak permisji", ephemeral: true });
+    // owner check
+    if (i.user.id !== owner && !isMod(i.member))
+      return i.reply({ content: "Brak dostępu", ephemeral: true });
 
-      return i.channel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setColor("#FEE75C")
-            .setDescription(`📌 Ticket przejęty przez <@${i.user.id}>`)
-        ]
-      });
+    if (action === "lock") {
+      await channel.permissionOverwrites.edit(i.guild.id, { Connect: false });
+      return i.reply({ content: "Kanał zamknięty", ephemeral: true });
     }
 
-    // ========== UNCLAIM ==========
-    if (i.customId === "unclaim") {
-      if (!isMod(i.member))
-        return i.reply({ content: "Brak permisji", ephemeral: true });
-
-      return i.channel.send({
-        embeds: [
-          new EmbedBuilder()
-            .setColor("#FFB02E")
-            .setDescription("↩ Ticket oddany do puli")
-        ]
-      });
+    if (action === "unlock") {
+      await channel.permissionOverwrites.edit(i.guild.id, { Connect: true });
+      return i.reply({ content: "Kanał otwarty", ephemeral: true });
     }
 
-    // ========== CLOSE ==========
-    if (i.customId === "close") {
-
-      closeConfirm.set(i.channel.id, i.user.id);
-
-      return i.reply({
-        ephemeral: true,
-        content: "Na pewno zamknąć ticket?",
-        components: [
-          new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId("yes_close").setLabel("Tak").setStyle(ButtonStyle.Danger),
-            new ButtonBuilder().setCustomId("no_close").setLabel("Nie").setStyle(ButtonStyle.Secondary)
-          )
-        ]
-      });
+    if (action === "rename") {
+      await channel.setName(`voice-${Date.now()}`);
+      return i.reply({ content: "Zmieniono nazwę", ephemeral: true });
     }
 
-    if (i.customId === "yes_close") {
-      if (closeConfirm.get(i.channel.id) !== i.user.id) return;
-
-      setTimeout(() => i.channel.delete(), 1500);
+    if (action === "kick") {
+      const target = channel.members.first();
+      if (!target) return i.reply({ content: "Brak osób", ephemeral: true });
+      target.voice.disconnect();
+      return i.reply({ content: "Wyrzucono", ephemeral: true });
     }
 
-    if (i.customId === "no_close") {
-      return i.update({ content: "Anulowano", components: [] });
+    if (action === "ban") {
+      const target = channel.members.first();
+      if (!target) return i.reply({ content: "Brak osób", ephemeral: true });
+
+      bans.add(target.id);
+      target.voice.disconnect();
+
+      return i.reply({ content: "Zbanowano z kanału", ephemeral: true });
     }
 
-    // ========== VOICE PANEL ==========
-    const [action, channelId] = i.customId.split("_");
+    if (action === "unban") {
+      const target = channel.members.first();
+      if (!target) return i.reply({ content: "Brak osób", ephemeral: true });
 
-    if (voiceOwners.has(channelId)) {
+      bans.delete(target.id);
+      return i.reply({ content: "Odbanowano", ephemeral: true });
+    }
 
-      const owner = voiceOwners.get(channelId);
-
-      if (i.user.id !== owner)
-        return i.reply({ content: "Nie twój kanał", ephemeral: true });
-
-      const channel = i.guild.channels.cache.get(channelId);
-      if (!channel) return;
-
-      if (action === "lock") {
-        await channel.permissionOverwrites.edit(i.guild.id, { Connect: false });
-        return i.reply({ content: "Kanał zamknięty", ephemeral: true });
-      }
-
-      if (action === "unlock") {
-        await channel.permissionOverwrites.edit(i.guild.id, { Connect: true });
-        return i.reply({ content: "Kanał otwarty", ephemeral: true });
-      }
-
-      if (action === "mute") {
-        channel.members.forEach(m => m.voice.setMute(true));
-        return i.reply({ content: "Wyciszono", ephemeral: true });
-      }
-
-      if (action === "unmute") {
-        channel.members.forEach(m => m.voice.setMute(false));
-        return i.reply({ content: "Odciszono", ephemeral: true });
-      }
-
-      if (action === "delete") {
-        voiceOwners.delete(channel.id);
-        await channel.delete();
-      }
+    if (action === "delete") {
+      voiceOwners.delete(channelId);
+      voiceBans.delete(channelId);
+      channel.delete().catch(()=>{});
     }
   }
 });
 
-// ================= VOICE CREATE SYSTEM =================
+// ================= VOICE CREATE =================
 client.on("voiceStateUpdate", async (oldState, newState) => {
 
   if (newState.channelId === CREATE_CHANNEL_ID) {
@@ -280,10 +219,12 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
 
     const channel = await newState.guild.channels.create({
       name: `Kanał ${member.user.username}`,
-      type: ChannelType.GuildVoice
+      type: ChannelType.GuildVoice,
+      parent: VOICE_CATEGORY_ID
     });
 
     voiceOwners.set(channel.id, member.id);
+    voiceBans.set(channel.id, new Set());
 
     await member.voice.setChannel(channel);
 
@@ -300,40 +241,63 @@ client.on("voiceStateUpdate", async (oldState, newState) => {
       .setTitle("🎛️ Panel kanału")
       .setColor("#5865F2")
       .setDescription(
-`🔒 Zamknij kanał
-🔓 Otwórz kanał
-🔇 Wycisz wszystkich
-🔊 Odcisz wszystkich
-❌ Usuń kanał`
+`Zarządzaj kanałem:
+
+🔒 Zamknij
+🔓 Otwórz
+✏️ Zmień nazwę
+👢 Wyrzuć
+⛔ Ban
+🟢 Unban
+❌ Usuń`
       );
 
-    const row = new ActionRowBuilder().addComponents(
+    const row1 = new ActionRowBuilder().addComponents(
       new ButtonBuilder().setCustomId(`lock_${channel.id}`).setLabel("Zamknij").setStyle(2),
       new ButtonBuilder().setCustomId(`unlock_${channel.id}`).setLabel("Otwórz").setStyle(2),
-      new ButtonBuilder().setCustomId(`mute_${channel.id}`).setLabel("Wycisz").setStyle(2),
-      new ButtonBuilder().setCustomId(`unmute_${channel.id}`).setLabel("Odcisz").setStyle(2),
-      new ButtonBuilder().setCustomId(`delete_${channel.id}`).setLabel("Usuń").setStyle(4)
+      new ButtonBuilder().setCustomId(`rename_${channel.id}`).setLabel("Rename").setStyle(1)
     );
 
-    await panel.send({ embeds: [embed], components: [row] });
+    const row2 = new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId(`kick_${channel.id}`).setLabel("Kick").setStyle(2),
+      new ButtonBuilder().setCustomId(`ban_${channel.id}`).setLabel("Ban").setStyle(4),
+      new ButtonBuilder().setCustomId(`unban_${channel.id}`).setLabel("Unban").setStyle(3),
+      new ButtonBuilder().setCustomId(`delete_${channel.id}`).setLabel("Delete").setStyle(4)
+    );
+
+    const msg = await panel.send({ embeds: [embed], components: [row1, row2] });
+
+    voicePanels.set(channel.id, panel.id);
   }
 
+  // AUTO DELETE + PANEL DELETE + 1 MIN EMPTY
   if (oldState.channelId && voiceOwners.has(oldState.channelId)) {
 
     const channel = oldState.channel;
 
+    if (!channel) return;
+
     if (channel.members.size === 0) {
 
-      const owner = voiceOwners.get(channel.id);
-      voiceOwners.delete(channel.id);
+      const timeout = setTimeout(() => {
 
-      const panel = channel.guild.channels.cache.find(c =>
-        c.name.includes("panel-")
-      );
+        const ch = oldState.guild.channels.cache.get(oldState.channelId);
+        if (!ch || ch.members.size > 0) return;
 
-      if (panel) panel.delete().catch(() => {});
+        const panelId = voicePanels.get(oldState.channelId);
+        const panel = oldState.guild.channels.cache.get(panelId);
 
-      channel.delete().catch(() => {});
+        if (panel) panel.delete().catch(()=>{});
+
+        voiceOwners.delete(oldState.channelId);
+        voicePanels.delete(oldState.channelId);
+        voiceBans.delete(oldState.channelId);
+
+        ch.delete().catch(()=>{});
+
+      }, 60000);
+
+      voiceTimeouts.set(oldState.channelId, timeout);
     }
   }
 });
