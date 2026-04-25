@@ -1,6 +1,6 @@
 {
   "name": "discord-bot-pro",
-  "version": "13.0.0",
+  "version": "14.0.0",
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
