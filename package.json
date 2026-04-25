@@ -1,6 +1,6 @@
 {
-  "name": "discord-bot-v3",
-  "version": "3.0.0",
+  "name": "discord-bot-v4",
+  "version": "4.0.0",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
